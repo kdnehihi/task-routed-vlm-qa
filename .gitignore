@@ -21,6 +21,17 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+data/**/*.parquet
+data/**/*.arrow
+data/**/*.jsonl
+data/**/*.zip
+data/**/*.tar
+data/**/*.tar.gz
+data/**/*.tgz
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+data/**/*.webp
 
 # Outputs and experiments
 outputs/*
@@ -30,6 +41,9 @@ logs/
 runs/
 wandb/
 mlruns/
+.cache/
+hf_cache/
+huggingface/
 
 # Model artifacts
 *.pt
@@ -42,4 +56,3 @@ mlruns/
 .DS_Store
 .vscode/
 .idea/
-
