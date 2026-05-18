@@ -1,0 +1,13 @@
+# LoRA fine-tuning configuration placeholder.
+# TODO: Add PEFT target modules, rank, alpha, dropout, and checkpoint paths.
+
+experiment:
+  name: lora_multitask_vlm
+  stage: scaffold
+
+lora:
+  rank: null
+  alpha: null
+  dropout: null
+  implementation_status: todo
+

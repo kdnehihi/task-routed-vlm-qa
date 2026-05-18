@@ -1,0 +1,17 @@
+# MoE/router configuration placeholder.
+# TODO: Define router inputs, expert names, routing supervision, and evaluation settings.
+
+experiment:
+  name: moe_router_adapters
+  stage: scaffold
+
+router:
+  type: instruction_aware
+  implementation_status: todo
+
+experts:
+  - image_vqa
+  - document_qa
+  - chart_qa
+  - scientific_figure_qa
+

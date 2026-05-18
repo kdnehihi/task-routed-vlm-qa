@@ -1,0 +1,29 @@
+# Planned core ML stack.
+torch
+torchvision
+transformers
+datasets
+accelerate
+peft
+
+# Configuration and experiment tracking.
+hydra-core
+omegaconf
+wandb
+
+# Evaluation and utilities.
+numpy
+pandas
+scikit-learn
+tqdm
+Pillow
+
+# Serving and demo.
+fastapi
+uvicorn
+streamlit
+
+# Testing and code quality.
+pytest
+ruff
+

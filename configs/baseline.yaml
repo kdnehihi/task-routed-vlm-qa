@@ -1,0 +1,18 @@
+# Shared multi-task VLM baseline configuration placeholder.
+# TODO: Add model name, processor settings, dataset paths, and evaluation options.
+
+experiment:
+  name: baseline_shared_vlm
+  stage: scaffold
+
+model:
+  candidate: blip-vqa
+  implementation_status: todo
+
+data:
+  tasks:
+    - image_vqa
+    - document_qa
+    - chart_qa
+    - scientific_figure_qa
+
