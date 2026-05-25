@@ -18,6 +18,11 @@ def parse_args():
     parser.add_argument("--split", default="validation")
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Stream examples from Hugging Face instead of caching full splits.",
+    )
     return parser.parse_args()
 
 
@@ -45,11 +50,17 @@ def as_answer_list(value) -> list[str]:
 def save_image(image, image_dir: Path, split: str, index: int) -> str:
     image_filename = f"{split}_{index:05d}.png"
     image_path = image_dir / image_filename
+    image = image.convert("RGB")
     image.save(image_path)
     return str(image_path)
 
 
-def save_docvqa_sample(split: str, limit: int, output_dir: str) -> None:
+def save_docvqa_sample(
+    split: str,
+    limit: int,
+    output_dir: str,
+    streaming: bool = False,
+) -> None:
     from datasets import load_dataset
 
     output_path, image_dir, metadata_path = prepare_output_paths(output_dir, split)
@@ -58,7 +69,10 @@ def save_docvqa_sample(split: str, limit: int, output_dir: str) -> None:
         DOCVQA_DATASET_NAME,
         DOCVQA_DATASET_CONFIG,
         split=split,
+        streaming=streaming,
     )
+
+    saved_count = 0
 
     with metadata_path.open("w", encoding="utf-8") as f:
         for index, example in enumerate(dataset):
@@ -76,11 +90,17 @@ def save_docvqa_sample(split: str, limit: int, output_dir: str) -> None:
             }
 
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            saved_count += 1
 
-    print(f"Saved {limit} examples to {output_path}", flush=True)
+    print(f"Saved {saved_count} examples to {output_path}", flush=True)
 
 
-def save_chartqa_sample(split: str, limit: int, output_dir: str) -> None:
+def save_chartqa_sample(
+    split: str,
+    limit: int,
+    output_dir: str,
+    streaming: bool = False,
+) -> None:
     from datasets import load_dataset
 
     hf_split = "val" if split == "validation" else split
@@ -89,7 +109,10 @@ def save_chartqa_sample(split: str, limit: int, output_dir: str) -> None:
     dataset = load_dataset(
         CHARTQA_DATASET_NAME,
         split=hf_split,
+        streaming=streaming,
     )
+
+    saved_count = 0
 
     with metadata_path.open("w", encoding="utf-8") as f:
         for index, example in enumerate(dataset):
@@ -107,11 +130,17 @@ def save_chartqa_sample(split: str, limit: int, output_dir: str) -> None:
             }
 
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            saved_count += 1
 
-    print(f"Saved {limit} examples to {output_path}", flush=True)
+    print(f"Saved {saved_count} examples to {output_path}", flush=True)
 
 
-def save_textvqa_sample(split: str, limit: int, output_dir: str) -> None:
+def save_textvqa_sample(
+    split: str,
+    limit: int,
+    output_dir: str,
+    streaming: bool = False,
+) -> None:
     from datasets import load_dataset
 
     output_path, image_dir, metadata_path = prepare_output_paths(output_dir, split)
@@ -119,7 +148,10 @@ def save_textvqa_sample(split: str, limit: int, output_dir: str) -> None:
     dataset = load_dataset(
         TEXTVQA_DATASET_NAME,
         split=split,
+        streaming=streaming,
     )
+
+    saved_count = 0
 
     with metadata_path.open("w", encoding="utf-8") as f:
         for index, example in enumerate(dataset):
@@ -137,8 +169,9 @@ def save_textvqa_sample(split: str, limit: int, output_dir: str) -> None:
             }
 
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            saved_count += 1
 
-    print(f"Saved {limit} examples to {output_path}", flush=True)
+    print(f"Saved {saved_count} examples to {output_path}", flush=True)
 
 
 def main() -> None:
@@ -146,11 +179,11 @@ def main() -> None:
     output_dir = args.output_dir or get_default_output_dir(args.dataset)
 
     if args.dataset == "docvqa":
-        save_docvqa_sample(args.split, args.limit, output_dir)
+        save_docvqa_sample(args.split, args.limit, output_dir, args.streaming)
     elif args.dataset == "chartqa":
-        save_chartqa_sample(args.split, args.limit, output_dir)
+        save_chartqa_sample(args.split, args.limit, output_dir, args.streaming)
     elif args.dataset == "textvqa":
-        save_textvqa_sample(args.split, args.limit, output_dir)
+        save_textvqa_sample(args.split, args.limit, output_dir, args.streaming)
     else:
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
