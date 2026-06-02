@@ -1,6 +1,6 @@
 # Multi-Task MoE Vision-Language Assistant
 
-Research-oriented scaffold for a multi-task vision-language question answering system with planned LoRA fine-tuning, task-specific adapters, routing, and MoE-style adapter selection.
+Research-oriented scaffold for a multi-task vision-language question answering system with a shared frozen VLM backbone, task-specific LoRA adapters, and instruction-aware adapter routing.
 
 ## Current Status
 
@@ -17,7 +17,7 @@ Vision-language QA tasks are often grouped under one broad "visual question answ
 - Chart QA often depends on visual data reading, axis interpretation, and numerical reasoning.
 - Scientific or medical-style figure QA may require domain-specific visual interpretation and careful uncertainty tracking.
 
-The central research question is whether a multi-task system can benefit from specialization while remaining modular and efficient. Instead of forcing one shared VLM to solve every task in the same way, this project will eventually compare shared, adapter-based, and router-based approaches.
+The central research question is whether a multi-task system can benefit from specialization while remaining modular and efficient. Instead of routing each task to a completely different model, the main architecture uses one shared frozen VLM backbone and routes each input to a task-specific LoRA adapter.
 
 ## Research Idea
 
@@ -25,8 +25,19 @@ The planned system will compare:
 
 1. Shared multi-task baseline
 2. LoRA fine-tuned baseline
-3. Task-specific adapter model
-4. MoE/router-based adapter model
+3. Task-specific LoRA adapters on the same frozen backbone
+4. Router-selected LoRA experts on the same frozen backbone
+
+The main target design is:
+
+```text
+image + question/instruction
+-> instruction/task router
+-> predicted task_type: chartqa, docvqa, or textvqa
+-> select LoRA_chartqa, LoRA_docvqa, or LoRA_textvqa
+-> run the same frozen VLM backbone with the selected LoRA adapter
+-> generate answer
+```
 
 Example routing intuition:
 
@@ -44,11 +55,11 @@ Example routing intuition:
 
 The long-term architecture may include:
 
-- Baseline VLM shared across all tasks
-- LoRA adapters through PEFT
-- Task-specific adapters
-- MoE adapters
-- Task router
+- One shared frozen VLM backbone, such as Qwen2-VL-2B-Instruct if hardware allows
+- Baseline VLM evaluation across all tasks
+- Shared LoRA fine-tuning through PEFT
+- Task-specific LoRA experts: `LoRA_chartqa`, `LoRA_docvqa`, `LoRA_textvqa`
+- Adapter router that selects a LoRA expert, not a separate whole model
 - Instruction-aware routing
 - Evaluation module for answer quality and router quality
 - FastAPI inference service
@@ -78,9 +89,10 @@ Dataset downloading and preprocessing are intentionally not implemented yet.
 
 ```text
 data preprocessing
--> baseline VLM
--> LoRA fine-tuning
--> task router / MoE adapters
+-> pretrained VLM baseline
+-> shared LoRA baseline
+-> task-specific LoRA experts
+-> instruction/task router for adapter selection
 -> evaluation
 -> FastAPI inference service
 -> Docker deployment
@@ -138,4 +150,3 @@ See:
 - [docs/design.md](docs/design.md)
 - [docs/roadmap.md](docs/roadmap.md)
 - [docs/experiments.md](docs/experiments.md)
-

@@ -1,17 +1,31 @@
-# MoE/router configuration placeholder.
-# TODO: Define router inputs, expert names, routing supervision, and evaluation settings.
+# Router configuration placeholder.
+# Main design: route to task-specific LoRA adapters on one shared frozen VLM
+# backbone, not to separate full models.
 
 experiment:
-  name: moe_router_adapters
+  name: router_selected_lora_experts
   stage: scaffold
+
+backbone:
+  model_id: Qwen/Qwen2-VL-2B-Instruct
+  frozen: true
+  implementation_status: planned
 
 router:
   type: instruction_aware
+  predicts:
+    - chartqa
+    - docvqa
+    - textvqa
   implementation_status: todo
 
 experts:
-  - image_vqa
-  - document_qa
-  - chart_qa
-  - scientific_figure_qa
-
+  chartqa:
+    adapter_name: LoRA_chartqa
+    adapter_type: lora
+  docvqa:
+    adapter_name: LoRA_docvqa
+    adapter_type: lora
+  textvqa:
+    adapter_name: LoRA_textvqa
+    adapter_type: lora

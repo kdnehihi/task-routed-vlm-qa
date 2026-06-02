@@ -28,16 +28,20 @@ Status: in progress
 - Track LoRA rank, target modules, memory usage, and task-level performance.
 - Compare against the shared baseline.
 
-## Phase 4: Task-Specific Adapters
+## Phase 4: Task-Specific LoRA Experts
 
-- Add separate adapters for image VQA, document QA, chart QA, and scientific figure QA.
+- Freeze one shared VLM backbone.
+- Train separate LoRA experts for ChartQA, DocVQA, and TextVQA.
+- Keep the backbone fixed so only adapter weights differ across tasks.
 - Compare specialization gains and failure modes.
 
-## Phase 5: Router and MoE
+## Phase 5: Router-Based Adapter Selection
 
-- Implement a task router.
+- Implement a task router that predicts `chartqa`, `docvqa`, or `textvqa`.
+- Use the predicted task type to select `LoRA_chartqa`, `LoRA_docvqa`, or `LoRA_textvqa`.
+- Do not route to separate full VLMs.
 - Add instruction-aware routing features.
-- Compare hard routing, soft routing, and MoE adapter composition.
+- Compare hard adapter routing, soft adapter weighting, and shared LoRA baselines.
 - Report routing accuracy and answer accuracy together.
 
 ## Phase 6: Evaluation and Analysis
@@ -52,4 +56,3 @@ Status: in progress
 - Add Docker configuration.
 - Add a simple Streamlit or React demo.
 - Prepare model cards and usage notes.
-

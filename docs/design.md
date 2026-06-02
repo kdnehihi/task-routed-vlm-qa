@@ -2,7 +2,7 @@
 
 ## Overview
 
-The intended system is a multi-task vision-language assistant that answers questions over images, documents, charts, and scientific or medical-style figures. The design emphasizes staged research: start with a shared baseline, then add LoRA, task-specific adapters, and eventually a router or MoE adapter layer.
+The intended system is a multi-task vision-language assistant that answers questions over images, documents, charts, and scientific or medical-style figures. The main architecture uses one shared frozen VLM backbone and multiple task-specific LoRA adapters. The router selects the LoRA adapter, not a completely different model.
 
 This document describes the target architecture only. It does not imply that the modules are implemented yet.
 
@@ -20,32 +20,53 @@ TODO: Finalize a common schema in `src/data/dataset.py`.
 
 ## Planned Components
 
-### Shared Baseline VLM
+### Shared Frozen VLM Backbone
 
-A shared baseline will provide a reference point for all task types. Candidate models include BLIP-VQA, Qwen2-VL small, LLaVA-small, or a lightweight frozen vision encoder with a small language decoder.
+A shared frozen backbone provides the common vision-language representation for all task types. The preferred long-term candidate is Qwen2-VL-2B-Instruct if GPU resources allow. Smaller baselines such as BLIP-VQA or GIT-VQA can be used while developing the pipeline.
 
-### LoRA Fine-Tuned Baseline
+### Shared LoRA Baseline
 
-LoRA fine-tuning will test whether parameter-efficient adaptation improves multi-task performance without introducing explicit routing.
+A shared LoRA adapter tests whether one parameter-efficient adapter can improve multi-task performance without explicit routing.
 
-### Task-Specific Adapters
+### Task-Specific LoRA Experts
 
-Task-specific adapters will allow separate specialization for image VQA, document QA, chart QA, and scientific figure QA. This stage should make it easier to compare specialization against a single shared model.
+Task-specific LoRA adapters allow specialization while keeping the same frozen backbone:
 
-### Router and MoE Adapters
+- `LoRA_chartqa`
+- `LoRA_docvqa`
+- `LoRA_textvqa`
 
-The router will eventually select or weight adapters based on question text, visual metadata, predicted task type, or instruction embeddings. The MoE version may route examples to task experts or combine expert outputs.
+This stage should compare specialization against the shared LoRA baseline without adding separate full models.
+
+### Instruction/Task Router
+
+The router predicts the task type from the question, instruction, and optionally visual metadata:
+
+- `chartqa`
+- `docvqa`
+- `textvqa`
+
+The predicted task type selects the corresponding LoRA adapter. The backbone remains the same.
+
+```text
+input image + question/instruction
+-> instruction/task router
+-> predicted task_type
+-> selected LoRA adapter
+-> same frozen VLM backbone + selected adapter
+-> generated answer
+```
 
 The router should eventually be evaluated as a model component, not only as an implementation detail.
 
 ## Planned Training Stages
 
 1. Normalize datasets into a shared format.
-2. Train or evaluate a shared multi-task baseline.
-3. Add LoRA fine-tuning for parameter-efficient adaptation.
-4. Add task-specific adapters.
-5. Add instruction-aware task routing.
-6. Add MoE-style adapter selection or expert composition.
+2. Evaluate a pretrained shared VLM baseline.
+3. Add a shared LoRA baseline for parameter-efficient adaptation.
+4. Train task-specific LoRA experts on the same frozen backbone.
+5. Add instruction-aware task routing for adapter selection.
+6. Add optional MoE-style soft adapter weighting or expert composition.
 7. Evaluate answer quality, routing quality, cost, latency, and memory usage.
 
 ## Evaluation Design
@@ -72,4 +93,3 @@ The planned serving layer will expose a FastAPI endpoint that accepts an image a
 - Latency information
 
 No serving logic is implemented yet.
-
