@@ -22,7 +22,7 @@ TODO: Finalize a common schema in `src/data/dataset.py`.
 
 ### Shared Frozen VLM Backbone
 
-A shared frozen backbone provides the common vision-language representation for all task types. The preferred long-term candidate is Qwen2-VL-2B-Instruct if GPU resources allow. Smaller baselines such as BLIP-VQA or GIT-VQA can be used while developing the pipeline.
+A shared frozen backbone provides the common vision-language representation for all task types. The preferred main backbone is Qwen2-VL-2B-Instruct because its zero-shot behavior is strong on the current multi-task samples. Smaller baselines such as BLIP-VQA or GIT-VQA can still be used for comparison or low-resource experiments.
 
 ### Shared LoRA Baseline
 
@@ -36,7 +36,7 @@ Task-specific LoRA adapters allow specialization while keeping the same frozen b
 - `LoRA_docvqa`
 - `LoRA_textvqa`
 
-This stage should compare specialization against the shared LoRA baseline without adding separate full models.
+These experts are initially symbolic design targets. They should later be trained separately on their corresponding task subsets while the Qwen2-VL backbone remains frozen. This stage should compare specialization against the shared LoRA baseline without adding separate full models.
 
 ### Instruction/Task Router
 

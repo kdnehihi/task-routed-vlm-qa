@@ -1,0 +1,58 @@
+# Qwen2-VL LoRA expert design.
+# This config is scaffold-only: it defines the intended experts and checkpoint
+# paths, but does not train or load adapters yet.
+
+experiment:
+  name: qwen2vl_task_specific_lora_experts
+  stage: design
+
+backbone:
+  model_id: Qwen/Qwen2-VL-2B-Instruct
+  frozen: true
+  role: shared_vision_language_backbone
+
+lora_defaults:
+  rank: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - q_proj
+    - v_proj
+
+experts:
+  chartqa:
+    adapter_name: LoRA_chartqa
+    train_dataset: chartqa
+    checkpoint_dir: outputs/checkpoints/qwen2vl_lora_chartqa
+    description: Chart reading, numerical values, axes, legends, and plotted data.
+
+  docvqa:
+    adapter_name: LoRA_docvqa
+    train_dataset: docvqa
+    checkpoint_dir: outputs/checkpoints/qwen2vl_lora_docvqa
+    description: Document QA over forms, receipts, layouts, tables, and OCR-heavy pages.
+
+  textvqa:
+    adapter_name: LoRA_textvqa
+    train_dataset: textvqa
+    checkpoint_dir: outputs/checkpoints/qwen2vl_lora_textvqa
+    description: Natural-image QA that requires reading text in the scene.
+
+router:
+  input:
+    - question
+    - instruction
+    - optional_dataset_metadata
+  output:
+    - chartqa
+    - docvqa
+    - textvqa
+  selection_target: lora_adapter
+  does_not_select: full_model
+
+inference_flow:
+  - receive_image_and_question
+  - predict_task_type
+  - select_matching_lora_adapter
+  - run_shared_frozen_qwen2vl_backbone_with_selected_adapter
+  - generate_answer

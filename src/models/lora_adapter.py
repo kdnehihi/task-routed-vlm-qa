@@ -1,8 +1,65 @@
-"""LoRA adapter placeholder.
+"""LoRA expert definitions for the planned Qwen2-VL adapter system.
 
-TODO:
-- Define PEFT configuration helpers.
-- Document target modules and trainable parameter counts.
-- Add real LoRA integration only after the baseline model interface is stable.
+This module intentionally does not train or load adapters yet. It only defines
+the symbolic expert registry that later training and routing code can share.
+
+Main design:
+- one frozen Qwen2-VL backbone
+- one LoRA adapter per task family
+- router predicts a task type and selects the matching LoRA adapter
 """
 
+from dataclasses import dataclass
+
+
+QWEN2VL_BACKBONE_ID = "Qwen/Qwen2-VL-2B-Instruct"
+
+
+@dataclass(frozen=True)
+class LoRAExpertConfig:
+    """Configuration metadata for one task-specific LoRA expert."""
+
+    task_type: str
+    adapter_name: str
+    checkpoint_dir: str
+    description: str
+    rank: int = 8
+    alpha: int = 16
+    dropout: float = 0.05
+    target_modules: tuple[str, ...] = ("q_proj", "v_proj")
+
+
+QWEN2VL_LORA_EXPERTS: dict[str, LoRAExpertConfig] = {
+    "chartqa": LoRAExpertConfig(
+        task_type="chartqa",
+        adapter_name="LoRA_chartqa",
+        checkpoint_dir="outputs/checkpoints/qwen2vl_lora_chartqa",
+        description="Expert adapter for chart reading and numerical visual QA.",
+    ),
+    "docvqa": LoRAExpertConfig(
+        task_type="docvqa",
+        adapter_name="LoRA_docvqa",
+        checkpoint_dir="outputs/checkpoints/qwen2vl_lora_docvqa",
+        description="Expert adapter for document QA, forms, receipts, and layout-heavy images.",
+    ),
+    "textvqa": LoRAExpertConfig(
+        task_type="textvqa",
+        adapter_name="LoRA_textvqa",
+        checkpoint_dir="outputs/checkpoints/qwen2vl_lora_textvqa",
+        description="Expert adapter for natural images that require reading scene text.",
+    ),
+}
+
+
+def get_lora_expert(task_type: str) -> LoRAExpertConfig:
+    """Return the LoRA expert config for a predicted task type."""
+    normalized_task_type = task_type.strip().lower()
+
+    if normalized_task_type not in QWEN2VL_LORA_EXPERTS:
+        known_tasks = ", ".join(sorted(QWEN2VL_LORA_EXPERTS))
+        raise ValueError(
+            f"Unsupported LoRA expert task type: {task_type!r}. "
+            f"Expected one of: {known_tasks}"
+        )
+
+    return QWEN2VL_LORA_EXPERTS[normalized_task_type]
