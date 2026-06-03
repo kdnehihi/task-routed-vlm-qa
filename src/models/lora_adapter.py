@@ -19,10 +19,12 @@ QWEN2VL_BACKBONE_ID = "Qwen/Qwen2-VL-2B-Instruct"
 class LoRAExpertConfig:
     """Configuration metadata for one task-specific LoRA expert."""
 
+    expert_id: int
     task_type: str
     adapter_name: str
     checkpoint_dir: str
     description: str
+    is_shared: bool = False
     rank: int = 8
     alpha: int = 16
     dropout: float = 0.05
@@ -31,22 +33,45 @@ class LoRAExpertConfig:
 
 QWEN2VL_LORA_EXPERTS: dict[str, LoRAExpertConfig] = {
     "chartqa": LoRAExpertConfig(
+        expert_id=1,
         task_type="chartqa",
         adapter_name="LoRA_chartqa",
         checkpoint_dir="outputs/checkpoints/qwen2vl_lora_chartqa",
         description="Expert adapter for chart reading and numerical visual QA.",
     ),
     "docvqa": LoRAExpertConfig(
+        expert_id=2,
         task_type="docvqa",
         adapter_name="LoRA_docvqa",
         checkpoint_dir="outputs/checkpoints/qwen2vl_lora_docvqa",
         description="Expert adapter for document QA, forms, receipts, and layout-heavy images.",
     ),
     "textvqa": LoRAExpertConfig(
+        expert_id=3,
         task_type="textvqa",
         adapter_name="LoRA_textvqa",
         checkpoint_dir="outputs/checkpoints/qwen2vl_lora_textvqa",
         description="Expert adapter for natural images that require reading scene text.",
+    ),
+}
+
+
+PLANNED_SHARED_LORA_EXPERTS: dict[str, LoRAExpertConfig] = {
+    "shared_ocr": LoRAExpertConfig(
+        expert_id=101,
+        task_type="shared_ocr",
+        adapter_name="LoRA_shared_ocr",
+        checkpoint_dir="outputs/checkpoints/qwen2vl_lora_shared_ocr",
+        description="Planned shared adapter for OCR-heavy behavior common to DocVQA and TextVQA.",
+        is_shared=True,
+    ),
+    "shared_reasoning": LoRAExpertConfig(
+        expert_id=102,
+        task_type="shared_reasoning",
+        adapter_name="LoRA_shared_reasoning",
+        checkpoint_dir="outputs/checkpoints/qwen2vl_lora_shared_reasoning",
+        description="Planned shared adapter for general visual reasoning common across tasks.",
+        is_shared=True,
     ),
 }
 

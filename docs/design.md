@@ -59,6 +59,27 @@ input image + question/instruction
 
 The router should eventually be evaluated as a model component, not only as an implementation detail.
 
+During router training and evaluation, each routing decision should be logged
+with the selected expert id and adapter name. This makes it possible to inspect
+whether the router is actually separating tasks or collapsing to one expert.
+
+Example log format:
+
+```text
+[router] sample=42 expert=1 task=chartqa adapter=LoRA_chartqa true_task=chartqa correct=True confidence=0.913
+```
+
+The initial hard-routing design uses:
+
+- expert `1`: `LoRA_chartqa`
+- expert `2`: `LoRA_docvqa`
+- expert `3`: `LoRA_textvqa`
+
+Future experiments may add shared LoRA experts, such as an OCR-heavy shared
+adapter for DocVQA/TextVQA or a general reasoning shared adapter for all tasks.
+Those shared experts should be measured separately from task-specific experts
+so their contribution is understandable.
+
 ## Planned Training Stages
 
 1. Normalize datasets into a shared format.

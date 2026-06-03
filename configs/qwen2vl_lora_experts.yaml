@@ -21,22 +21,38 @@ lora_defaults:
 
 experts:
   chartqa:
+    expert_id: 1
     adapter_name: LoRA_chartqa
     train_dataset: chartqa
     checkpoint_dir: outputs/checkpoints/qwen2vl_lora_chartqa
     description: Chart reading, numerical values, axes, legends, and plotted data.
 
   docvqa:
+    expert_id: 2
     adapter_name: LoRA_docvqa
     train_dataset: docvqa
     checkpoint_dir: outputs/checkpoints/qwen2vl_lora_docvqa
     description: Document QA over forms, receipts, layouts, tables, and OCR-heavy pages.
 
   textvqa:
+    expert_id: 3
     adapter_name: LoRA_textvqa
     train_dataset: textvqa
     checkpoint_dir: outputs/checkpoints/qwen2vl_lora_textvqa
     description: Natural-image QA that requires reading text in the scene.
+
+planned_shared_experts:
+  shared_ocr:
+    expert_id: 101
+    adapter_name: LoRA_shared_ocr
+    checkpoint_dir: outputs/checkpoints/qwen2vl_lora_shared_ocr
+    description: Planned shared adapter for OCR-heavy behavior common to DocVQA and TextVQA.
+
+  shared_reasoning:
+    expert_id: 102
+    adapter_name: LoRA_shared_reasoning
+    checkpoint_dir: outputs/checkpoints/qwen2vl_lora_shared_reasoning
+    description: Planned shared adapter for general visual reasoning common across tasks.
 
 router:
   input:
@@ -49,6 +65,16 @@ router:
     - textvqa
   selection_target: lora_adapter
   does_not_select: full_model
+  logging:
+    print_selected_expert: true
+    log_fields:
+      - sample_id
+      - expert_id
+      - predicted_task_type
+      - adapter_name
+      - true_task_type
+      - correct
+      - confidence
 
 inference_flow:
   - receive_image_and_question
