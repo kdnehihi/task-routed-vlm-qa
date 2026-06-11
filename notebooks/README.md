@@ -1,9 +1,8 @@
 # Notebooks
 
-Reserved for exploratory analysis, dataset inspection, visual QA examples, and experiment summaries.
+Use `train_qwen2vl_lora_baseline.ipynb` for the current Qwen2-VL sanity check.
+It runs the full flow in one pass: data prep, zero-shot evaluation, label
+decode checks, shared LoRA training, shared LoRA evaluation, and a final
+zero-shot vs shared-LoRA comparison report.
 
-TODO:
-
-- Add lightweight dataset exploration notebooks after data contracts are defined.
-- Keep notebooks reproducible and avoid committing large outputs.
-
+The MoE/router notebooks were removed until the shared LoRA baseline is stable.
