@@ -3,6 +3,9 @@
 Use `train_qwen2vl_lora_baseline.ipynb` as the single Colab entry point for
 Qwen2-VL adapter diagnostics.
 
+Use `qwen2vl_lora_rank_sweep.ipynb` to run prioritized LoRA rank/config sweeps
+and compare saved ChartQA/hybrid reports before committing to a larger run.
+
 Set `ADAPTER_MODE` and `TRAIN_ADAPTER` in the config cell:
 
 - `zero_shot`, `TRAIN_ADAPTER=False`: evaluate the base Qwen2-VL path.
