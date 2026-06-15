@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from src.data.answers import canonicalize_task_type
 
 
-QWEN2VL_BACKBONE_ID = "Qwen/Qwen2-VL-2B-Instruct"
+QWEN2VL_BACKBONE_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
 
 
 @dataclass(frozen=True)

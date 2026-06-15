@@ -22,9 +22,9 @@ and 334 TextVQA.
 
 Saved adapter paths:
 
-- `outputs/checkpoints/qwen2vl/shared_doc_text_lora`
-- `outputs/checkpoints/qwen2vl/chart_lora`
-- `outputs/checkpoints/qwen2vl/shared_lora_all_tasks`
+- `outputs/checkpoints/qwen2vl/qwen25vl_7b/shared_doc_text_lora`
+- `outputs/checkpoints/qwen2vl/qwen25vl_7b/chart_lora`
+- `outputs/checkpoints/qwen2vl/qwen25vl_7b/shared_lora_all_tasks`
 
 No GRPO, DPO, MoME, router training, teacher distillation, or new backbone is
 included in this notebook.

@@ -7,7 +7,7 @@ experiment:
   stage: design
 
 backbone:
-  model_id: Qwen/Qwen2-VL-2B-Instruct
+  model_id: Qwen/Qwen2.5-VL-7B-Instruct
   frozen: true
   role: shared_vision_language_backbone
 

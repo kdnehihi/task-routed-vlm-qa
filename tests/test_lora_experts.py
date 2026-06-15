@@ -18,7 +18,7 @@ from src.routing.task_router import (
 
 
 def test_qwen2vl_lora_expert_registry_contains_three_task_experts() -> None:
-    assert QWEN2VL_BACKBONE_ID == "Qwen/Qwen2-VL-2B-Instruct"
+    assert QWEN2VL_BACKBONE_ID == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert set(QWEN2VL_LORA_EXPERTS) == {"chartqa", "docvqa", "textvqa"}
     assert QWEN2VL_LORA_EXPERTS["chartqa"].expert_id == 1
     assert QWEN2VL_LORA_EXPERTS["docvqa"].expert_id == 2

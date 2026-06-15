@@ -40,7 +40,7 @@ TARGET_MODULE_PRESETS = {
 
 def parse_args():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("--model-name", default="Qwen/Qwen2-VL-2B-Instruct")
+    parser.add_argument("--model-name", default="Qwen/Qwen2.5-VL-7B-Instruct")
     parser.add_argument("--metadata-path", default="data/processed/multitask/validation.jsonl")
     parser.add_argument("--raw-chart-path", default="data/raw/chartqa/sample/validation.jsonl")
     parser.add_argument("--prepare-if-missing", action="store_true")

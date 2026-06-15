@@ -22,7 +22,7 @@ TODO: Finalize a common schema in `src/data/dataset.py`.
 
 ### Shared Frozen VLM Backbone
 
-A shared frozen backbone provides the common vision-language representation for all task types. The preferred main backbone is Qwen2-VL-2B-Instruct because its zero-shot behavior is strong on the current multi-task samples. Smaller baselines such as BLIP-VQA or GIT-VQA can still be used for comparison or low-resource experiments.
+A shared frozen backbone provides the common vision-language representation for all task types. The preferred main backbone is Qwen2.5-VL-7B-Instruct because its zero-shot behavior is strong on the current multi-task samples. Smaller baselines such as BLIP-VQA or GIT-VQA can still be used for comparison or low-resource experiments.
 
 ### Shared LoRA Baseline
 

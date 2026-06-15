@@ -7,7 +7,7 @@ experiment:
   stage: scaffold
 
 backbone:
-  model_id: Qwen/Qwen2-VL-2B-Instruct
+  model_id: Qwen/Qwen2.5-VL-7B-Instruct
   frozen: true
   implementation_status: planned
 

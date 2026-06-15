@@ -55,7 +55,7 @@ Example routing intuition:
 
 The long-term architecture may include:
 
-- One shared frozen VLM backbone, such as Qwen2-VL-2B-Instruct if hardware allows
+- One shared frozen VLM backbone, such as Qwen2.5-VL-7B-Instruct if hardware allows
 - Baseline VLM evaluation across all tasks
 - Shared LoRA fine-tuning through PEFT
 - Task-specific LoRA experts: `LoRA_chartqa`, `LoRA_docvqa`, `LoRA_textvqa`
