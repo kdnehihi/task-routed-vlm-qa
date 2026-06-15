@@ -24,7 +24,8 @@ from src.evaluation.evaluator import build_prediction_records, summarize_quality
 
 CHART_PROMPT = """Read the chart carefully.
 Use the chart title, axis labels, legend, colors, categories, and values to answer the question.
-Return only the final value, label, yes/no answer, or short phrase.
+If the question asks yes/no, answer only Yes or No.
+Otherwise return only the final value, label, or short phrase.
 Do not explain.
 Do not include extra text.
 
@@ -201,10 +202,23 @@ def format_prompt(question: str) -> str:
     return CHART_PROMPT.format(question=question)
 
 
-def clean_generated_answer(answer: str) -> str:
+YES_NO_QUESTION_RE = re.compile(
+    r"^\s*(is|are|was|were|do|does|did|can|could|has|have|had|will|would|"
+    r"should|may|might)\b",
+    re.IGNORECASE,
+)
+
+
+def is_yes_no_question(question: str) -> bool:
+    return bool(YES_NO_QUESTION_RE.search(str(question)))
+
+
+def clean_generated_answer(answer: str, question: str | None = None) -> str:
     cleaned = " ".join(str(answer).strip().split())
     if not cleaned:
         return cleaned
+    if question is not None and not is_yes_no_question(question):
+        cleaned = re.sub(r"\s+(?:yes|no)\s*$", "", cleaned, flags=re.IGNORECASE)
     tokens = cleaned.split()
     for start in range(1, len(tokens)):
         suffix = tokens[start:]
@@ -423,7 +437,7 @@ def predict_one(model, processor, process_vision_info, record: dict) -> tuple[st
         for input_ids, output_ids in zip(inputs.input_ids, generated_ids)
     ]
     raw_prediction = processor.batch_decode(generated_trimmed, skip_special_tokens=True)[0].strip()
-    return raw_prediction, clean_generated_answer(raw_prediction)
+    return raw_prediction, clean_generated_answer(raw_prediction, record.get("question", ""))
 
 
 def evaluate(model, processor, process_vision_info, test_records: list[dict], args):
