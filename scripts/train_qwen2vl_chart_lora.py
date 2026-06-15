@@ -56,6 +56,13 @@ def parse_args():
     parser.add_argument("--lora-r", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--qlora", action="store_true", help="Load the base model in 4-bit NF4 for QLoRA.")
+    parser.add_argument(
+        "--bnb-4bit-compute-dtype",
+        choices=["bf16", "fp16"],
+        default="bf16",
+        help="Compute dtype for 4-bit QLoRA layers.",
+    )
     parser.add_argument("--target-modules-preset", choices=sorted(TARGET_MODULE_PRESETS), default="B")
     parser.add_argument("--target-modules", default=None)
     parser.add_argument("--min-pixels", type=int, default=256 * 28 * 28)
@@ -70,13 +77,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def ensure_dependencies() -> None:
+def ensure_dependencies(args) -> None:
     missing = []
     for module_name in ("peft", "qwen_vl_utils", "transformers", "torch"):
         try:
             __import__(module_name)
         except ModuleNotFoundError:
             missing.append(module_name)
+    if args.qlora:
+        try:
+            __import__("bitsandbytes")
+        except ModuleNotFoundError:
+            missing.append("bitsandbytes")
     if missing:
         raise ModuleNotFoundError(
             "Missing required modules: "
@@ -461,12 +473,13 @@ def get_qwen_vl_model_class(model_name: str):
 
 def main() -> None:
     args = parse_args()
-    ensure_dependencies()
+    ensure_dependencies(args)
 
     import torch
-    from peft import LoraConfig, PeftModel, get_peft_model
+    from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
     from qwen_vl_utils import process_vision_info
     from transformers import AutoProcessor
+    from transformers import BitsAndBytesConfig
 
     random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -476,7 +489,18 @@ def main() -> None:
     print(f"Loaded ChartQA records: total={len(records)} train={len(train_records)} test={len(test_records)}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    compute_dtype = torch.bfloat16 if args.bnb_4bit_compute_dtype == "bf16" else torch.float16
+    dtype = compute_dtype if device == "cuda" else torch.float32
+    quantization_config = None
+    if args.qlora:
+        if device != "cuda":
+            raise RuntimeError("--qlora requires a CUDA GPU because bitsandbytes 4-bit layers run on GPU.")
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
     processor = AutoProcessor.from_pretrained(
         args.model_name,
         min_pixels=args.min_pixels,
@@ -486,6 +510,7 @@ def main() -> None:
     model = model_class.from_pretrained(
         args.model_name,
         torch_dtype=dtype,
+        quantization_config=quantization_config,
         device_map="auto" if device == "cuda" else None,
     )
     if device != "cuda":
@@ -500,6 +525,17 @@ def main() -> None:
         print(f"Loaded chart_lora from {adapter_path}")
     else:
         model.config.use_cache = False
+        if args.qlora:
+            model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+            print(
+                "QLoRA enabled:",
+                {
+                    "load_in_4bit": True,
+                    "bnb_4bit_quant_type": "nf4",
+                    "bnb_4bit_use_double_quant": True,
+                    "bnb_4bit_compute_dtype": args.bnb_4bit_compute_dtype,
+                },
+            )
         lora_config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
@@ -548,6 +584,8 @@ def main() -> None:
             "lora_r": args.lora_r,
             "lora_alpha": args.lora_alpha,
             "lora_dropout": args.lora_dropout,
+            "qlora": args.qlora,
+            "bnb_4bit_compute_dtype": args.bnb_4bit_compute_dtype if args.qlora else None,
             "target_modules": target_modules_from_args(args),
         },
         "paths": {
