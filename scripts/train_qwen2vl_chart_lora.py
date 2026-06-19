@@ -6,7 +6,7 @@ can be tested locally on a small 400/100 split before spending notebook quota.
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 from pathlib import Path
 import json
 import random
@@ -19,6 +19,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.answers import canonicalize_task_type, choose_training_answer
+from src.data.chartqa_sampling import (
+    DEFAULT_CHARTQA_2K_QUOTAS,
+    attach_chartqa_metadata,
+    chartqa_sampling_stats,
+    print_chartqa_sampling_debug,
+    save_chartqa_sampling_stats,
+    stratified_chartqa_sample,
+)
 from src.evaluation.evaluator import build_prediction_records, summarize_quality_records_by_task
 
 
@@ -49,6 +57,17 @@ def parse_args():
     parser.add_argument("--sample-limit", type=int, default=500)
     parser.add_argument("--train-size", type=int, default=400)
     parser.add_argument("--test-size", type=int, default=100)
+    parser.add_argument(
+        "--chartqa-balanced-sampling",
+        action=BooleanOptionalAction,
+        default=True,
+        help="Balance the ChartQA training subset by rule-based question_type buckets.",
+    )
+    parser.add_argument(
+        "--chartqa-stats-path",
+        default="outputs/data_stats/chartqa_balanced_train_stats.json",
+        help="Where to save ChartQA balanced sampling stats.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -149,6 +168,7 @@ def load_chart_records(args) -> list[dict]:
             record["answers"] = [str(answer) for answer in record.get("answers", [])]
             record["image_path"] = record["image_path"]
             record["chosen_training_answer"] = choose_training_answer(record["answers"], "chartqa")
+            attach_chartqa_metadata(record)
             records.append(record)
         return records
 
@@ -195,6 +215,22 @@ def split_records(records: list[dict], train_size: int, test_size: int, seed: in
     random.Random(seed).shuffle(shuffled)
     train_records = shuffled[:train_size]
     test_records = shuffled[train_size:train_size + test_size]
+    return train_records, test_records
+
+
+def split_records_with_balanced_train(records: list[dict], train_size: int, test_size: int, seed: int):
+    if train_size + test_size > len(records):
+        raise ValueError("train-size + test-size must be <= sample-limit.")
+    shuffled = records.copy()
+    random.Random(seed).shuffle(shuffled)
+    test_records = shuffled[:test_size]
+    train_pool = shuffled[test_size:]
+    train_records = stratified_chartqa_sample(
+        train_pool,
+        DEFAULT_CHARTQA_2K_QUOTAS,
+        seed=seed,
+        sample_limit=train_size,
+    )
     return train_records, test_records
 
 
@@ -499,7 +535,24 @@ def main() -> None:
     torch.manual_seed(args.seed)
 
     records = load_chart_records(args)
-    train_records, test_records = split_records(records, args.train_size, args.test_size, args.seed)
+    if args.chartqa_balanced_sampling:
+        train_records, test_records = split_records_with_balanced_train(
+            records,
+            args.train_size,
+            args.test_size,
+            args.seed,
+        )
+        sampling_stats = chartqa_sampling_stats(
+            train_records,
+            DEFAULT_CHARTQA_2K_QUOTAS,
+            args.seed,
+            args.train_size,
+        )
+        save_chartqa_sampling_stats(sampling_stats, PROJECT_ROOT / args.chartqa_stats_path)
+        print("ChartQA balanced train stats:", json.dumps(sampling_stats, indent=2))
+        print_chartqa_sampling_debug(train_records)
+    else:
+        train_records, test_records = split_records(records, args.train_size, args.test_size, args.seed)
     print(f"Loaded ChartQA records: total={len(records)} train={len(train_records)} test={len(test_records)}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -601,11 +654,15 @@ def main() -> None:
             "qlora": args.qlora,
             "bnb_4bit_compute_dtype": args.bnb_4bit_compute_dtype if args.qlora else None,
             "target_modules": target_modules_from_args(args),
+            "chartqa_balanced_sampling": args.chartqa_balanced_sampling,
+            "chartqa_sampling_seed": args.seed,
+            "chartqa_quotas": DEFAULT_CHARTQA_2K_QUOTAS,
         },
         "paths": {
             "checkpoint": str(output_dir),
             "predictions": str(predictions_path),
             "report": str(PROJECT_ROOT / args.report_path),
+            "chartqa_sampling_stats": str(PROJECT_ROOT / args.chartqa_stats_path),
         },
     }
     report_path = PROJECT_ROOT / args.report_path
