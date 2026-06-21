@@ -6,10 +6,14 @@ from src.evaluation.metrics import (
     anls,
     chart_hybrid_accuracy,
     containment,
+    docvqa_exact_match,
     exact_match,
+    maybe_extract_docvqa_short_span,
     mean_score,
     normalize_answer,
+    normalize_docvqa_for_match,
     output_token_length,
+    postprocess_docvqa_answer,
     raw_exact_match,
     relaxed_numeric_accuracy,
     routing_accuracy,
@@ -21,6 +25,34 @@ from src.evaluation.metrics import (
 
 def test_normalize_answer() -> None:
     assert normalize_answer(" The Revenue, 2021! ") == "revenue 2021"
+
+
+def test_docvqa_postprocess_preserves_full_dates() -> None:
+    assert postprocess_docvqa_answer("September 3 to 9 ,1972 .") == "September 3 to 9, 1972"
+
+
+def test_docvqa_normalization_matches_formatting_equivalents() -> None:
+    assert normalize_docvqa_for_match("14,000") == normalize_docvqa_for_match("14000")
+    assert normalize_docvqa_for_match("$2,000") == normalize_docvqa_for_match("$2000")
+    assert normalize_docvqa_for_match("33,600") == normalize_docvqa_for_match("33600")
+    assert normalize_docvqa_for_match("E. G. Farrier") == normalize_docvqa_for_match("E.G.Farrier")
+    assert normalize_docvqa_for_match("713 - 792 - 3493") == normalize_docvqa_for_match("713-792-3493")
+    assert normalize_docvqa_for_match("The Coca-Cola Company") == normalize_docvqa_for_match("Coca-Cola Company")
+
+
+def test_docvqa_normalization_keeps_wrong_answers_wrong() -> None:
+    assert normalize_docvqa_for_match("0.1") != normalize_docvqa_for_match("0.15 mls")
+    assert normalize_docvqa_for_match("0") != normalize_docvqa_for_match("50")
+    assert normalize_docvqa_for_match("50557 9766") != normalize_docvqa_for_match("503781642")
+    assert normalize_docvqa_for_match("Dr. Gio Batta Gori") != normalize_docvqa_for_match("Gloria Geri")
+
+
+def test_docvqa_short_span_extraction_is_conservative() -> None:
+    assert maybe_extract_docvqa_short_span("10 mg/kg", "What is the recommended maximum residue limit?", ["10"]) == "10"
+    assert maybe_extract_docvqa_short_span("$36,000 (4 waves)", "What is the amount?", ["$36,000"]) == "$36,000"
+    assert maybe_extract_docvqa_short_span("George Washington", "Where?", ["Washington"]) == "Washington"
+    assert maybe_extract_docvqa_short_span("0.15 mls", "What is the value?", ["0.1"]) == "0.15 mls"
+    assert docvqa_exact_match("$2,000", ["$2000"]) == 1.0
 
 
 def test_exact_match_accepts_any_ground_truth_answer() -> None:

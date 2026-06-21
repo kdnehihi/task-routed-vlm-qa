@@ -31,6 +31,149 @@ def normalize_text(text: str) -> str:
     return normalize_answer(text)
 
 
+def postprocess_docvqa_answer(raw_answer: str, question: str | None = None) -> str:
+    """Clean DocVQA predictions without destroying valid document spans."""
+    del question
+    text = str(raw_answer).strip()
+    if not text:
+        return ""
+
+    text = normalize_docvqa_surface(text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"(?<=\D)([,;:])(?=\S)", r"\1 ", text)
+    text = re.sub(r"(?<=\d),(?=\d{4}\b)", ", ", text)
+    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"\$\s+", "$", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if safe_remove_docvqa_trailing_punctuation(text):
+        text = text[:-1].rstrip()
+    return text
+
+
+def normalize_docvqa_surface(text: str) -> str:
+    """Normalize harmless Unicode and whitespace surface differences."""
+    replacements = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u00a0": " ",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return " ".join(text.split())
+
+
+def safe_remove_docvqa_trailing_punctuation(text: str) -> bool:
+    """Return whether final sentence punctuation can be dropped safely."""
+    if not text or text[-1] not in ".!?":
+        return False
+    if re.search(r"\b[A-Z]\.$", text):
+        return False
+    if re.search(r"\b(?:Mr|Mrs|Ms|Dr|Prof|St|No|Inc|Ltd|Co)\.$", text):
+        return False
+    return True
+
+
+def normalize_docvqa_for_match(text: str) -> str:
+    """Normalize DocVQA answers for conservative formatting-equivalent matches."""
+    normalized = postprocess_docvqa_answer(text).lower()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"\bthe\s+", "", normalized, count=1)
+    normalized = re.sub(r"\$\s*", "$", normalized)
+    normalized = re.sub(r"(?<=\d),\s*(?=\d{3}\b)", "", normalized)
+    normalized = re.sub(r"\s*-\s*", "-", normalized)
+    normalized = normalize_docvqa_initials(normalized)
+    normalized = re.sub(r"\s+([,.;:!?])", r"\1", normalized)
+    normalized = re.sub(r"(?<=\D)([,;:])(?=\S)", r"\1 ", normalized)
+    normalized = re.sub(r"(?<=\d),(?=\d{4}\b)", ", ", normalized)
+    normalized = normalized.strip()
+    if safe_remove_docvqa_trailing_punctuation(normalized):
+        normalized = normalized[:-1].rstrip()
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def normalize_docvqa_initials(text: str) -> str:
+    """Collapse spacing in initials without deleting letters."""
+    text = re.sub(r"\b([a-z])\.\s+(?=[a-z]\.)", r"\1.", text)
+    text = re.sub(r"((?:\b[a-z]\.){2,})\s+(?=[a-z])", r"\1", text)
+    return text
+
+
+def docvqa_exact_match(prediction: str, answers: list[str]) -> float:
+    """Return exact match using DocVQA-specific normalization."""
+    normalized_prediction = normalize_docvqa_for_match(prediction)
+    for answer in answers:
+        if normalized_prediction == normalize_docvqa_for_match(answer):
+            return 1.0
+    return 0.0
+
+
+def docvqa_anls(prediction: str, answers: list[str]) -> float:
+    """Return ANLS using DocVQA-specific formatting normalization."""
+    normalized_prediction = normalize_docvqa_for_match(prediction)
+    if not normalized_prediction:
+        return 0.0
+
+    best_score = 0.0
+    for answer in answers:
+        normalized_answer = normalize_docvqa_for_match(answer)
+        if not normalized_answer:
+            continue
+        distance = levenshtein_distance(normalized_prediction, normalized_answer)
+        similarity = 1.0 - distance / max(len(normalized_prediction), len(normalized_answer))
+        if similarity >= 0.5:
+            best_score = max(best_score, similarity)
+    return best_score
+
+
+def maybe_extract_docvqa_short_span(
+    pred: str,
+    question: str,
+    references: list[str],
+) -> str:
+    """Return a conservative reference span for DocVQA metric debugging."""
+    cleaned_pred = postprocess_docvqa_answer(pred, question)
+    normalized_pred = normalize_docvqa_for_match(cleaned_pred)
+    if not normalized_pred:
+        return cleaned_pred
+
+    for reference in references:
+        normalized_ref = normalize_docvqa_for_match(reference)
+        if not normalized_ref or normalized_ref == normalized_pred:
+            continue
+        if safe_docvqa_span_match(normalized_ref, normalized_pred):
+            return postprocess_docvqa_answer(reference, question)
+    return cleaned_pred
+
+
+def safe_docvqa_span_match(normalized_ref: str, normalized_pred: str) -> bool:
+    """Allow only full-token span matches that are unlikely to flip meaning."""
+    if normalized_ref not in normalized_pred:
+        return False
+    pattern = rf"(?<![a-z0-9]){re.escape(normalized_ref)}(?![a-z0-9])"
+    if not re.search(pattern, normalized_pred):
+        return False
+    if is_decimal_like(normalized_ref):
+        return False
+    if is_plain_number(normalized_ref):
+        return True
+    if len(normalized_ref) >= 4 and len(normalized_ref.split()) <= 3:
+        return True
+    return False
+
+
+def is_plain_number(text: str) -> bool:
+    return bool(re.fullmatch(r"\$?\d+(?:\.\d+)?", text))
+
+
+def is_decimal_like(text: str) -> bool:
+    return bool(re.fullmatch(r"\d*\.\d+", text))
+
+
 def remove_punctuation(text: str) -> str:
     """Remove punctuation characters from text."""
     return "".join(char for char in text if char not in string.punctuation)

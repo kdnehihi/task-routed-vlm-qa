@@ -1,14 +1,21 @@
 """Evaluation helpers for vision-language QA predictions."""
 
+import re
+
 from src.evaluation.metrics import (
     anls,
     chart_hybrid_accuracy,
     containment,
+    docvqa_anls,
+    docvqa_exact_match,
     loose_containment,
+    maybe_extract_docvqa_short_span,
     mean_score,
     normalize_answer,
+    normalize_docvqa_for_match,
     normalized_exact_match,
     output_token_length,
+    postprocess_docvqa_answer,
     raw_exact_match,
     relaxed_numeric_accuracy,
     routing_accuracy,
@@ -87,53 +94,166 @@ def build_prediction_records(
 
     records = []
     for index, (prediction, reference) in enumerate(zip(predictions, references)):
+        task_type = reference.get("task_type", "")
+        question = reference.get("question", "")
         cleaned_prediction = (
             cleaned_predictions[index]
             if cleaned_predictions is not None
             else str(prediction).strip()
         )
         answers = reference["answers"]
+        old_cleaned_prediction = cleaned_prediction
+        docvqa_metric_prediction = None
+        docvqa_postprocess_reason = None
+        if task_type == "docvqa":
+            cleaned_prediction = postprocess_docvqa_answer(cleaned_prediction, question)
+            docvqa_metric_prediction = maybe_extract_docvqa_short_span(
+                cleaned_prediction,
+                question,
+                answers,
+            )
+            docvqa_postprocess_reason = infer_docvqa_postprocess_reason(
+                old_cleaned_prediction,
+                cleaned_prediction,
+                docvqa_metric_prediction,
+                answers,
+            )
+
+        metric_prediction = docvqa_metric_prediction or cleaned_prediction
+        normalized_prediction = (
+            normalize_docvqa_for_match(metric_prediction)
+            if task_type == "docvqa"
+            else normalize_answer(cleaned_prediction)
+        )
+        normalized_references = (
+            [normalize_docvqa_for_match(answer) for answer in answers]
+            if task_type == "docvqa"
+            else [normalize_answer(answer) for answer in answers]
+        )
+        normalized_em_score = (
+            docvqa_exact_match(metric_prediction, answers)
+            if task_type == "docvqa"
+            else normalized_exact_match(cleaned_prediction, answers)
+        )
         records.append(
             {
                 "index": index,
-                "question": reference.get("question", ""),
-                "task_type": reference.get("task_type", ""),
+                "question": question,
+                "task_type": task_type,
                 "answers": answers,
                 "chosen_training_answer": reference.get("chosen_training_answer"),
                 "raw_prediction": prediction,
                 "cleaned_prediction": cleaned_prediction,
-                "normalized_prediction": normalize_answer(cleaned_prediction),
-                "normalized_references": [normalize_answer(answer) for answer in answers],
+                "normalized_prediction": normalized_prediction,
+                "normalized_references": normalized_references,
                 "output_length": output_token_length(cleaned_prediction),
                 "raw_exact_match": raw_exact_match(prediction, answers),
-                "normalized_em": normalized_exact_match(cleaned_prediction, answers),
+                "normalized_em": normalized_em_score,
                 "token_f1": token_f1(cleaned_prediction, answers),
                 "strict_containment": strict_containment(cleaned_prediction, answers),
                 "old_containment_if_available": loose_containment(cleaned_prediction, answers),
                 "containment": containment(cleaned_prediction, answers),
+                "old_cleaned_prediction_if_available": (
+                    old_cleaned_prediction if task_type == "docvqa" else None
+                ),
+                "old_normalized_match_if_available": (
+                    normalized_exact_match(old_cleaned_prediction, answers)
+                    if task_type == "docvqa"
+                    else None
+                ),
+                "docvqa_metric_prediction": (
+                    docvqa_metric_prediction if task_type == "docvqa" else None
+                ),
+                "docvqa_normalized_prediction": (
+                    normalized_prediction if task_type == "docvqa" else None
+                ),
+                "docvqa_postprocess_reason": (
+                    docvqa_postprocess_reason if task_type == "docvqa" else None
+                ),
                 "chart_relaxed_accuracy": task_metric(
-                    reference.get("task_type", ""),
+                    task_type,
                     "chartqa",
                     relaxed_numeric_accuracy(cleaned_prediction, answers),
                 ),
                 "chart_hybrid_accuracy": task_metric(
-                    reference.get("task_type", ""),
+                    task_type,
                     "chartqa",
                     chart_hybrid_accuracy(cleaned_prediction, answers),
                 ),
                 "anls": task_metric(
-                    reference.get("task_type", ""),
+                    task_type,
                     ("docvqa", "textvqa"),
-                    anls(cleaned_prediction, answers),
+                    docvqa_anls(metric_prediction, answers)
+                    if task_type == "docvqa"
+                    else anls(cleaned_prediction, answers),
                 ),
                 "vqa_score": task_metric(
-                    reference.get("task_type", ""),
+                    task_type,
                     "textvqa",
                     vqa_soft_score(cleaned_prediction, answers),
                 ),
             }
         )
     return records
+
+
+def infer_docvqa_postprocess_reason(
+    old_prediction: str,
+    new_prediction: str,
+    metric_prediction: str | None,
+    answers: list[str],
+) -> str | None:
+    """Infer a compact debug label for DocVQA postprocess changes."""
+    if metric_prediction and metric_prediction != new_prediction:
+        return "short_span"
+    if old_prediction == new_prediction:
+        return None
+    joined = " ".join([old_prediction, new_prediction, *answers])
+    if re_contains(r"\$\s*\d|\$\d{1,3},\d{3}", joined):
+        return "currency_format"
+    if re_contains(r"\d{1,3},\d{3}", joined):
+        return "numeric_comma"
+    if re_contains(r"\d\s*-\s*\d", joined):
+        return "phone_hyphen"
+    if re_contains(r"\b[A-Za-z]\.\s+[A-Za-z]\.", joined):
+        return "initials_spacing"
+    if re_contains(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)", joined.lower()):
+        return "date_cleanup"
+    if re_contains(r"\b(?:mg|kg|ml|mls|copies|waves)\b", joined.lower()):
+        return "unit_suffix"
+    return "punctuation_spacing"
+
+
+def re_contains(pattern: str, text: str) -> bool:
+    return bool(re.search(pattern, text))
+
+
+def build_docvqa_postprocess_debug_records(records: list[dict]) -> list[dict]:
+    """Return DocVQA records whose cleaned or metric-normalized output changed."""
+    debug_records = []
+    for record in records:
+        if record.get("task_type") != "docvqa":
+            continue
+        old_cleaned = record.get("old_cleaned_prediction_if_available")
+        new_cleaned = record.get("cleaned_prediction")
+        metric_prediction = record.get("docvqa_metric_prediction")
+        if old_cleaned == new_cleaned and metric_prediction == new_cleaned:
+            continue
+        debug_records.append(
+            {
+                "question": record.get("question"),
+                "references": record.get("answers"),
+                "raw_prediction": record.get("raw_prediction"),
+                "old_cleaned_prediction": old_cleaned,
+                "new_cleaned_prediction": new_cleaned,
+                "docvqa_metric_prediction": metric_prediction,
+                "docvqa_normalized_prediction": record.get("docvqa_normalized_prediction"),
+                "old_normalized_match": record.get("old_normalized_match_if_available"),
+                "new_normalized_match": record.get("normalized_em"),
+                "reason": record.get("docvqa_postprocess_reason"),
+            }
+        )
+    return debug_records
 
 
 def task_metric(task_type: str, expected: str | tuple[str, ...], score: float) -> float | None:
