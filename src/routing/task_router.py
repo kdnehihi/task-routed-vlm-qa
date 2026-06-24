@@ -18,6 +18,7 @@ from src.data.answers import canonicalize_task_type
 
 TASK_TYPES = ("chartqa", "docvqa", "textvqa")
 DEFAULT_ROUTER_PATH = Path("checkpoints/router/question_router.joblib")
+DEFAULT_DEBERTA_ROUTER_DIR = Path("checkpoints/router/deberta_question_router")
 DEFAULT_MIN_CONFIDENCE = 0.65
 
 BASE_BACKEND_NAME = "base_zero_shot"
@@ -146,6 +147,215 @@ class TfidfLogRegTaskRouter:
             raise RuntimeError("Router is not fitted. Call fit(...) or load(...) first.")
 
 
+class DebertaEmbeddingLogRegTaskRouter:
+    """Question router using frozen DeBERTa embeddings + Logistic Regression.
+
+    This matches ``notebooks/router_deberta.ipynb``. The DeBERTa encoder is used
+    only as a text feature extractor; the lightweight sklearn classifier makes
+    the task prediction.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "microsoft/deberta-v3-small",
+        max_length: int = 96,
+        classifier: Any | None = None,
+        tokenizer: Any | None = None,
+        encoder: Any | None = None,
+        device: str | None = None,
+    ) -> None:
+        self.model_name = model_name
+        self.max_length = max_length
+        self.classifier = classifier
+        self.tokenizer = tokenizer
+        self.encoder = encoder
+        self.device = device
+
+    def fit(
+        self,
+        questions: list[str],
+        labels: list[str],
+    ) -> "DebertaEmbeddingLogRegTaskRouter":
+        """Fit the Logistic Regression classifier on DeBERTa embeddings."""
+        if len(questions) != len(labels):
+            raise ValueError("questions and labels must have the same length")
+        if not questions:
+            raise ValueError("training data is empty")
+        bad_labels = set(labels) - set(TASK_TYPES)
+        if bad_labels:
+            raise ValueError(f"Unknown labels: {bad_labels}")
+
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        embeddings = self.encode_questions(questions)
+        self.classifier = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "classifier",
+                    LogisticRegression(
+                        C=2.0,
+                        max_iter=2000,
+                        class_weight="balanced",
+                        random_state=42,
+                    ),
+                ),
+            ]
+        )
+        self.classifier.fit(embeddings, labels)
+        return self
+
+    def predict(self, question: str) -> str:
+        """Predict one canonical task type from a question string."""
+        self._ensure_classifier()
+        embedding = self.encode_questions([question])
+        return str(self.classifier.predict(embedding)[0])
+
+    def predict_with_confidence(self, question: str) -> tuple[str, float | None]:
+        """Predict task and max Logistic Regression probability."""
+        self._ensure_classifier()
+        embedding = self.encode_questions([question])
+        task_type = str(self.classifier.predict(embedding)[0])
+        if not hasattr(self.classifier, "predict_proba"):
+            return task_type, None
+        probabilities = self.classifier.predict_proba(embedding)[0]
+        return task_type, float(max(probabilities))
+
+    def encode_questions(
+        self,
+        questions: list[str],
+        batch_size: int = 32,
+    ):
+        """Encode question strings into mean-pooled DeBERTa vectors."""
+        self._ensure_encoder()
+
+        import numpy as np
+        import torch
+
+        vectors = []
+        self.encoder.eval()
+        with torch.no_grad():
+            for start in range(0, len(questions), batch_size):
+                batch_questions = questions[start : start + batch_size]
+                encoded = self.tokenizer(
+                    batch_questions,
+                    padding=True,
+                    truncation=True,
+                    max_length=self.max_length,
+                    return_tensors="pt",
+                )
+                encoded = {
+                    key: value.to(self.device)
+                    for key, value in encoded.items()
+                }
+                outputs = self.encoder(**encoded)
+                pooled = self._mean_pool(
+                    outputs.last_hidden_state,
+                    encoded["attention_mask"],
+                )
+                vectors.append(pooled.detach().cpu().numpy())
+
+        return np.concatenate(vectors, axis=0)
+
+    def save(self, path: str | Path = DEFAULT_DEBERTA_ROUTER_DIR) -> None:
+        """Save encoder, tokenizer, sklearn classifier, and router metadata."""
+        self._ensure_encoder()
+        self._ensure_classifier()
+        import json
+        import joblib
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        self.tokenizer.save_pretrained(path / "tokenizer")
+        self.encoder.save_pretrained(path / "encoder")
+        joblib.dump(self.classifier, path / "embedding_logreg.joblib")
+        (path / "router_config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "deberta_embedding_logistic_regression_router",
+                    "model_name": self.model_name,
+                    "max_length": self.max_length,
+                    "task_types": list(TASK_TYPES),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path = DEFAULT_DEBERTA_ROUTER_DIR,
+        device: str | None = None,
+    ) -> "DebertaEmbeddingLogRegTaskRouter":
+        """Load a saved DeBERTa embedding router directory."""
+        import json
+        import joblib
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        path = Path(path)
+        config_path = path / "router_config.json"
+        metadata_path = path / "router_metadata.json"
+        config = {}
+        if config_path.exists():
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        elif metadata_path.exists():
+            config = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        model_name = config.get("model_name") or config.get("base_model")
+        model_name = model_name or "microsoft/deberta-v3-small"
+        max_length = int(config.get("max_length", 96))
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        tokenizer_path = path / "tokenizer"
+        encoder_path = path / "encoder"
+        classifier_path = path / "embedding_logreg.joblib"
+        if not classifier_path.exists():
+            raise FileNotFoundError(f"Missing router classifier: {classifier_path}")
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            str(tokenizer_path) if tokenizer_path.exists() else model_name
+        )
+        encoder = AutoModel.from_pretrained(
+            str(encoder_path) if encoder_path.exists() else model_name
+        ).to(device)
+        classifier = joblib.load(classifier_path)
+
+        return cls(
+            model_name=model_name,
+            max_length=max_length,
+            classifier=classifier,
+            tokenizer=tokenizer,
+            encoder=encoder,
+            device=device,
+        )
+
+    def _ensure_encoder(self) -> None:
+        if self.tokenizer is not None and self.encoder is not None:
+            return
+
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self.device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.encoder = AutoModel.from_pretrained(self.model_name).to(self.device)
+
+    def _ensure_classifier(self) -> None:
+        if self.classifier is None:
+            raise RuntimeError("Router is not fitted. Call fit(...) or load(...) first.")
+
+    @staticmethod
+    def _mean_pool(last_hidden_state, attention_mask):
+        mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
+        summed = (last_hidden_state * mask).sum(dim=1)
+        denom = mask.sum(dim=1).clamp(min=1e-6)
+        return summed / denom
+
+
 def build_tfidf_logreg_pipeline():
     """Return the sklearn TF-IDF + Logistic Regression pipeline."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -271,7 +481,7 @@ def route_task_from_instruction(question: str) -> str:
 
 def select_task_backend(
     question: str,
-    router: TfidfLogRegTaskRouter | None = None,
+    router: Any | None = None,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
 ) -> RouterDecision:
     """Route a question to the current best backend.
@@ -296,7 +506,7 @@ def select_task_backend(
 def select_lora_expert(
     question: str,
     confidence: float | None = None,
-    router: TfidfLogRegTaskRouter | None = None,
+    router: Any | None = None,
 ) -> RouterDecision:
     """Backward-compatible wrapper for older call sites.
 

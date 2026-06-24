@@ -10,6 +10,7 @@ from src.models.lora_adapter import (
     get_lora_expert,
 )
 from src.routing.task_router import (
+    DebertaEmbeddingLogRegTaskRouter,
     TfidfLogRegTaskRouter,
     format_router_decision,
     get_backend_for_task,
@@ -118,6 +119,19 @@ def test_select_task_backend_low_confidence_falls_back_to_base() -> None:
 
 def test_tfidf_router_rejects_invalid_training_data() -> None:
     router = TfidfLogRegTaskRouter()
+
+    with pytest.raises(ValueError, match="same length"):
+        router.fit(["what value"], ["chartqa", "docvqa"])
+
+    with pytest.raises(ValueError, match="training data is empty"):
+        router.fit([], [])
+
+    with pytest.raises(ValueError, match="Unknown labels"):
+        router.fit(["what value"], ["bad_task"])
+
+
+def test_deberta_embedding_router_rejects_invalid_training_data() -> None:
+    router = DebertaEmbeddingLogRegTaskRouter()
 
     with pytest.raises(ValueError, match="same length"):
         router.fit(["what value"], ["chartqa", "docvqa"])
