@@ -10,9 +10,13 @@ from src.models.lora_adapter import (
     get_lora_expert,
 )
 from src.routing.task_router import (
+    TfidfLogRegTaskRouter,
     format_router_decision,
+    get_backend_for_task,
     route_task_from_instruction,
     select_lora_expert,
+    select_task_backend,
+    summarize_router_backends,
     summarize_router_decisions,
 )
 
@@ -60,12 +64,69 @@ def test_router_decision_can_be_logged_with_expert_id() -> None:
     )
 
     assert decision.expert_id == 1
-    assert decision.adapter_name == "LoRA_chartqa"
+    assert decision.backend_name == "chart_dora_r8_a16_B_lr2e-5"
+    assert decision.use_adapter is True
+    assert decision.adapter_name == "chart_dora"
     assert "sample=7" in log_line
     assert "expert=1" in log_line
     assert "task=chartqa" in log_line
-    assert "adapter=LoRA_chartqa" in log_line
+    assert "backend=chart_dora_r8_a16_B_lr2e-5" in log_line
+    assert "use_adapter=True" in log_line
+    assert "adapter=chart_dora" in log_line
     assert "correct=True" in log_line
+
+
+def test_backend_mapping_uses_base_for_docvqa() -> None:
+    decision = get_backend_for_task("docvqa")
+
+    assert decision.task_type == "docvqa"
+    assert decision.use_adapter is False
+    assert decision.backend_name == "base_zero_shot"
+    assert decision.expert_id is None
+    assert decision.adapter_name is None
+    assert decision.checkpoint_dir is None
+
+
+def test_backend_mapping_uses_best_chart_and_text_adapters() -> None:
+    chart_decision = get_backend_for_task("chartqa")
+    text_decision = get_backend_for_task("textvqa")
+
+    assert chart_decision.use_adapter is True
+    assert chart_decision.backend_name == "chart_dora_r8_a16_B_lr2e-5"
+    assert chart_decision.adapter_name == "chart_dora"
+    assert text_decision.use_adapter is True
+    assert text_decision.backend_name == "textvqa_lora_only"
+    assert text_decision.adapter_name == "textvqa_lora"
+
+
+def test_select_task_backend_low_confidence_falls_back_to_base() -> None:
+    class LowConfidenceRouter:
+        def predict_with_confidence(self, question: str):
+            return "chartqa", 0.42
+
+    decision = select_task_backend(
+        question="what is shown?",
+        router=LowConfidenceRouter(),
+        min_confidence=0.65,
+    )
+
+    assert decision.task_type == "unknown"
+    assert decision.use_adapter is False
+    assert decision.backend_name == "base_zero_shot"
+    assert decision.confidence == 0.42
+
+
+def test_tfidf_router_rejects_invalid_training_data() -> None:
+    router = TfidfLogRegTaskRouter()
+
+    with pytest.raises(ValueError, match="same length"):
+        router.fit(["what value"], ["chartqa", "docvqa"])
+
+    with pytest.raises(ValueError, match="training data is empty"):
+        router.fit([], [])
+
+    with pytest.raises(ValueError, match="Unknown labels"):
+        router.fit(["what value"], ["bad_task"])
 
 
 def test_router_decision_summary_counts_expert_usage() -> None:
@@ -76,7 +137,12 @@ def test_router_decision_summary_counts_expert_usage() -> None:
         select_lora_expert("What is the total on this receipt?"),
     ]
 
-    assert summarize_router_decisions(decisions) == {1: 1, 2: 2, 3: 1}
+    assert summarize_router_decisions(decisions) == {1: 1, 3: 1}
+    assert summarize_router_backends(decisions) == {
+        "chart_dora_r8_a16_B_lr2e-5": 1,
+        "base_zero_shot": 2,
+        "textvqa_lora_only": 1,
+    }
 
 
 def test_planned_shared_experts_are_separate_from_task_experts() -> None:
@@ -95,5 +161,5 @@ def test_hybrid_lora_adapter_registry_contains_chart_and_doc_text_paths() -> Non
         "qwen2vl/shared_doc_text_lora"
     )
     assert QWEN2VL_HYBRID_LORA_ADAPTERS["chart_lora"].checkpoint_dir.endswith(
-        "qwen2vl/chart_lora"
+        "chart_dora_r8_a16_B_lr2e-5/chart_dora_r8_a16_B_lr2e-5"
     )

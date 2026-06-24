@@ -93,10 +93,14 @@ QWEN2VL_HYBRID_LORA_ADAPTERS: dict[str, LoRAExpertConfig] = {
         expert_id=202,
         task_type="chartqa",
         adapter_name="chart_lora",
-        checkpoint_dir="outputs/checkpoints/qwen2vl/chart_lora",
-        description="Chart-specific adapter for chart reading and numeric grounding.",
+        checkpoint_dir=(
+            "checkpoints/chart_dora_r8_a16_B_lr2e-5/"
+            "chart_dora_r8_a16_B_lr2e-5"
+        ),
+        description="Best local ChartQA DoRA adapter for chart reading and numeric grounding.",
         rank=8,
         alpha=16,
+        target_modules=("q_proj", "v_proj"),
     ),
     "shared_lora_all_tasks": LoRAExpertConfig(
         expert_id=203,

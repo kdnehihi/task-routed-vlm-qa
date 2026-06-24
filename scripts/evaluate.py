@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         default="dummy",
-        choices=("dummy", "blip", "blip_lora"),
+        choices=("dummy", "blip", "blip_lora", "qwen2vl", "qwen2vl_chart_lora"),
     )
     parser.add_argument("--model-id", default=None)
     parser.add_argument("--adapter-path", default=None)
