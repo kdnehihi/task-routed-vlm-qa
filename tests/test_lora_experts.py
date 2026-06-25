@@ -11,12 +11,14 @@ from src.models.lora_adapter import (
 )
 from src.routing.task_router import (
     DebertaEmbeddingLogRegTaskRouter,
+    MultimodalDebertaClipTaskRouter,
     TfidfLogRegTaskRouter,
     format_router_decision,
     get_backend_for_task,
     route_task_from_instruction,
     select_lora_expert,
     select_task_backend,
+    select_task_backend_for_image,
     summarize_router_backends,
     summarize_router_decisions,
 )
@@ -141,6 +143,37 @@ def test_deberta_embedding_router_rejects_invalid_training_data() -> None:
 
     with pytest.raises(ValueError, match="Unknown labels"):
         router.fit(["what value"], ["bad_task"])
+
+
+def test_multimodal_router_rejects_invalid_training_data() -> None:
+    router = MultimodalDebertaClipTaskRouter()
+
+    with pytest.raises(ValueError, match="same length"):
+        router.fit(["what value"], ["image.png"], ["chartqa", "docvqa"])
+
+    with pytest.raises(ValueError, match="training data is empty"):
+        router.fit([], [], [])
+
+    with pytest.raises(ValueError, match="Unknown labels"):
+        router.fit(["what value"], ["image.png"], ["bad_task"])
+
+
+def test_select_task_backend_for_image_uses_multimodal_router() -> None:
+    class MockMultimodalRouter:
+        def predict_with_confidence(self, question: str, image_path: str):
+            assert question == "what is in this image?"
+            assert image_path == "sample.png"
+            return "textvqa", 0.97
+
+    decision = select_task_backend_for_image(
+        "what is in this image?",
+        "sample.png",
+        router=MockMultimodalRouter(),
+    )
+
+    assert decision.task_type == "textvqa"
+    assert decision.backend_name == "textvqa_lora_only"
+    assert decision.confidence == 0.97
 
 
 def test_router_decision_summary_counts_expert_usage() -> None:

@@ -17,10 +17,12 @@ from src.routing.task_router import (
     BASE_BACKEND_NAME,
     CHARTQA_BACKEND_NAME,
     DEFAULT_DEBERTA_ROUTER_DIR,
+    DEFAULT_MULTIMODAL_ROUTER_DIR,
     TEXTVQA_BACKEND_NAME,
     DebertaEmbeddingLogRegTaskRouter,
+    MultimodalDebertaClipTaskRouter,
     RouterDecision,
-    select_task_backend,
+    select_task_backend_for_image,
 )
 
 
@@ -54,10 +56,16 @@ Question: {question}
 Answer:"""
 
 
-def load_router(router_path: Path) -> DebertaEmbeddingLogRegTaskRouter | None:
-    """Load the trained DeBERTa embedding router when available."""
-    classifier_path = router_path / "embedding_logreg.joblib"
-    if not classifier_path.exists():
+def load_router(
+    router_path: Path,
+) -> MultimodalDebertaClipTaskRouter | DebertaEmbeddingLogRegTaskRouter | None:
+    """Load the trained multimodal router, with text-only fallback support."""
+    multimodal_classifier = router_path / "multimodal_logreg.joblib"
+    if multimodal_classifier.exists():
+        return MultimodalDebertaClipTaskRouter.load(router_path)
+
+    text_classifier = router_path / "embedding_logreg.joblib"
+    if not text_classifier.exists():
         return None
     return DebertaEmbeddingLogRegTaskRouter.load(router_path)
 
@@ -147,8 +155,9 @@ def main() -> None:
 
     router_path = st.sidebar.text_input(
         "Router checkpoint",
-        value=str(DEFAULT_DEBERTA_ROUTER_DIR),
+        value=str(DEFAULT_MULTIMODAL_ROUTER_DIR),
     )
+    st.sidebar.caption(f"Text-only fallback path: `{DEFAULT_DEBERTA_ROUTER_DIR}`")
     min_confidence = st.sidebar.slider(
         "Router confidence fallback",
         min_value=0.0,
@@ -176,10 +185,12 @@ def main() -> None:
         return
 
     if st.button("Answer", type="primary"):
+        image_path = save_uploaded_image(uploaded_image)
         with st.spinner("Loading router..."):
             router = load_router(Path(router_path))
-            decision = select_task_backend(
+            decision = select_task_backend_for_image(
                 question,
+                image_path,
                 router=router,
                 min_confidence=min_confidence,
             )
@@ -194,7 +205,6 @@ def main() -> None:
             }
         )
 
-        image_path = save_uploaded_image(uploaded_image)
         with st.spinner(f"Running {decision.backend_name}..."):
             model = get_or_load_model(decision)
             answer = model.predict(image_path, question)

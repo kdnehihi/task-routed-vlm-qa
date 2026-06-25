@@ -19,6 +19,7 @@ from src.data.answers import canonicalize_task_type
 TASK_TYPES = ("chartqa", "docvqa", "textvqa")
 DEFAULT_ROUTER_PATH = Path("checkpoints/router/question_router.joblib")
 DEFAULT_DEBERTA_ROUTER_DIR = Path("checkpoints/router/deberta_question_router")
+DEFAULT_MULTIMODAL_ROUTER_DIR = Path("checkpoints/router/multimodal_deberta_clip_router")
 DEFAULT_MIN_CONFIDENCE = 0.65
 
 BASE_BACKEND_NAME = "base_zero_shot"
@@ -355,6 +356,293 @@ class DebertaEmbeddingLogRegTaskRouter:
         return summed / denom
 
 
+class MultimodalDebertaClipTaskRouter:
+    """Task router using DeBERTa text embeddings + CLIP image embeddings."""
+
+    def __init__(
+        self,
+        text_model_name: str = "microsoft/deberta-v3-small",
+        image_model_name: str = "openai/clip-vit-base-patch32",
+        max_text_length: int = 96,
+        classifier: Any | None = None,
+        text_tokenizer: Any | None = None,
+        text_encoder: Any | None = None,
+        image_processor: Any | None = None,
+        image_encoder: Any | None = None,
+        device: str | None = None,
+    ) -> None:
+        self.text_model_name = text_model_name
+        self.image_model_name = image_model_name
+        self.max_text_length = max_text_length
+        self.classifier = classifier
+        self.text_tokenizer = text_tokenizer
+        self.text_encoder = text_encoder
+        self.image_processor = image_processor
+        self.image_encoder = image_encoder
+        self.device = device
+
+    def fit(
+        self,
+        questions: list[str],
+        image_paths: list[str],
+        labels: list[str],
+    ) -> "MultimodalDebertaClipTaskRouter":
+        """Fit the Logistic Regression classifier on text+image embeddings."""
+        if not (len(questions) == len(image_paths) == len(labels)):
+            raise ValueError("questions, image_paths, and labels must have the same length")
+        if not questions:
+            raise ValueError("training data is empty")
+        bad_labels = set(labels) - set(TASK_TYPES)
+        if bad_labels:
+            raise ValueError(f"Unknown labels: {bad_labels}")
+
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        features = self.encode_pairs(questions, image_paths)
+        self.classifier = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "classifier",
+                    LogisticRegression(
+                        C=2.0,
+                        max_iter=2000,
+                        class_weight="balanced",
+                        random_state=42,
+                    ),
+                ),
+            ]
+        )
+        self.classifier.fit(features, labels)
+        return self
+
+    def predict(self, question: str, image_path: str) -> str:
+        """Predict one canonical task type from an image-question pair."""
+        self._ensure_classifier()
+        features = self.encode_pairs([question], [image_path])
+        return str(self.classifier.predict(features)[0])
+
+    def predict_with_confidence(
+        self,
+        question: str,
+        image_path: str,
+    ) -> tuple[str, float | None]:
+        """Predict task and max Logistic Regression probability."""
+        self._ensure_classifier()
+        features = self.encode_pairs([question], [image_path])
+        task_type = str(self.classifier.predict(features)[0])
+        if not hasattr(self.classifier, "predict_proba"):
+            return task_type, None
+        probabilities = self.classifier.predict_proba(features)[0]
+        return task_type, float(max(probabilities))
+
+    def encode_pairs(
+        self,
+        questions: list[str],
+        image_paths: list[str],
+        batch_size: int = 32,
+    ):
+        """Encode question/image pairs into concatenated feature vectors."""
+        import numpy as np
+
+        if len(questions) != len(image_paths):
+            raise ValueError("questions and image_paths must have the same length")
+        text_vectors = self.encode_texts(questions, batch_size=batch_size)
+        image_vectors = self.encode_images(image_paths, batch_size=batch_size)
+        return np.concatenate([text_vectors, image_vectors], axis=1)
+
+    def encode_texts(
+        self,
+        questions: list[str],
+        batch_size: int = 32,
+    ):
+        """Encode question strings into mean-pooled DeBERTa vectors."""
+        self._ensure_loaded()
+
+        import numpy as np
+        import torch
+
+        vectors = []
+        self.text_encoder.eval()
+        with torch.no_grad():
+            for start in range(0, len(questions), batch_size):
+                batch_questions = questions[start : start + batch_size]
+                encoded = self.text_tokenizer(
+                    batch_questions,
+                    padding=True,
+                    truncation=True,
+                    max_length=self.max_text_length,
+                    return_tensors="pt",
+                )
+                encoded = {
+                    key: value.to(self.device)
+                    for key, value in encoded.items()
+                }
+                outputs = self.text_encoder(**encoded)
+                pooled = self._mean_pool(
+                    outputs.last_hidden_state,
+                    encoded["attention_mask"],
+                )
+                vectors.append(pooled.detach().cpu().numpy())
+        return np.concatenate(vectors, axis=0)
+
+    def encode_images(
+        self,
+        image_paths: list[str],
+        batch_size: int = 32,
+    ):
+        """Encode image paths into normalized CLIP image vectors."""
+        self._ensure_loaded()
+
+        import numpy as np
+        import torch
+        from PIL import Image
+
+        vectors = []
+        self.image_encoder.eval()
+        with torch.no_grad():
+            for start in range(0, len(image_paths), batch_size):
+                batch_paths = image_paths[start : start + batch_size]
+                images = [Image.open(path).convert("RGB") for path in batch_paths]
+                encoded = self.image_processor(images=images, return_tensors="pt")
+                encoded = {
+                    key: value.to(self.device)
+                    for key, value in encoded.items()
+                }
+                outputs = self.image_encoder.get_image_features(**encoded)
+                if hasattr(outputs, "image_embeds"):
+                    image_features = outputs.image_embeds
+                elif hasattr(outputs, "pooler_output"):
+                    image_features = outputs.pooler_output
+                elif isinstance(outputs, (tuple, list)):
+                    image_features = outputs[0]
+                else:
+                    image_features = outputs
+                image_features = torch.nn.functional.normalize(image_features, dim=-1)
+                vectors.append(image_features.detach().cpu().numpy())
+        return np.concatenate(vectors, axis=0)
+
+    def save(self, path: str | Path = DEFAULT_MULTIMODAL_ROUTER_DIR) -> None:
+        """Save encoders, processors, sklearn classifier, and router config."""
+        self._ensure_loaded()
+        self._ensure_classifier()
+        import json
+        import joblib
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        self.text_tokenizer.save_pretrained(path / "text_tokenizer")
+        self.text_encoder.save_pretrained(path / "text_encoder")
+        self.image_processor.save_pretrained(path / "image_processor")
+        self.image_encoder.save_pretrained(path / "image_encoder")
+        joblib.dump(self.classifier, path / "multimodal_logreg.joblib")
+        (path / "router_config.json").write_text(
+            json.dumps(
+                {
+                    "model_type": "deberta_clip_multimodal_logistic_regression_router",
+                    "text_model": self.text_model_name,
+                    "image_model": self.image_model_name,
+                    "max_text_length": self.max_text_length,
+                    "task_types": list(TASK_TYPES),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path = DEFAULT_MULTIMODAL_ROUTER_DIR,
+        device: str | None = None,
+    ) -> "MultimodalDebertaClipTaskRouter":
+        """Load a saved multimodal router directory."""
+        import json
+        import joblib
+        import torch
+        from transformers import AutoModel, AutoTokenizer, CLIPModel, CLIPProcessor
+
+        path = Path(path)
+        config_path = path / "router_config.json"
+        metadata_path = path / "router_metadata.json"
+        config = {}
+        if config_path.exists():
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        elif metadata_path.exists():
+            config = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+        text_model_name = config.get("text_model") or "microsoft/deberta-v3-small"
+        image_model_name = config.get("image_model") or "openai/clip-vit-base-patch32"
+        max_text_length = int(config.get("max_text_length", 96))
+        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        classifier_path = path / "multimodal_logreg.joblib"
+        if not classifier_path.exists():
+            raise FileNotFoundError(f"Missing router classifier: {classifier_path}")
+
+        text_tokenizer_path = path / "text_tokenizer"
+        text_encoder_path = path / "text_encoder"
+        image_processor_path = path / "image_processor"
+        image_encoder_path = path / "image_encoder"
+
+        text_tokenizer = AutoTokenizer.from_pretrained(
+            str(text_tokenizer_path) if text_tokenizer_path.exists() else text_model_name
+        )
+        text_encoder = AutoModel.from_pretrained(
+            str(text_encoder_path) if text_encoder_path.exists() else text_model_name
+        ).to(device)
+        image_processor = CLIPProcessor.from_pretrained(
+            str(image_processor_path) if image_processor_path.exists() else image_model_name
+        )
+        image_encoder = CLIPModel.from_pretrained(
+            str(image_encoder_path) if image_encoder_path.exists() else image_model_name
+        ).to(device)
+        classifier = joblib.load(classifier_path)
+
+        return cls(
+            text_model_name=text_model_name,
+            image_model_name=image_model_name,
+            max_text_length=max_text_length,
+            classifier=classifier,
+            text_tokenizer=text_tokenizer,
+            text_encoder=text_encoder,
+            image_processor=image_processor,
+            image_encoder=image_encoder,
+            device=device,
+        )
+
+    def _ensure_loaded(self) -> None:
+        if (
+            self.text_tokenizer is not None
+            and self.text_encoder is not None
+            and self.image_processor is not None
+            and self.image_encoder is not None
+        ):
+            return
+
+        import torch
+        from transformers import AutoModel, AutoTokenizer, CLIPModel, CLIPProcessor
+
+        self.device = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.text_tokenizer = AutoTokenizer.from_pretrained(self.text_model_name)
+        self.text_encoder = AutoModel.from_pretrained(self.text_model_name).to(self.device)
+        self.image_processor = CLIPProcessor.from_pretrained(self.image_model_name)
+        self.image_encoder = CLIPModel.from_pretrained(self.image_model_name).to(self.device)
+
+    def _ensure_classifier(self) -> None:
+        if self.classifier is None:
+            raise RuntimeError("Router is not fitted. Call fit(...) or load(...) first.")
+
+    @staticmethod
+    def _mean_pool(last_hidden_state, attention_mask):
+        mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
+        summed = (last_hidden_state * mask).sum(dim=1)
+        denom = mask.sum(dim=1).clamp(min=1e-6)
+        return summed / denom
+
+
 def build_tfidf_logreg_pipeline():
     """Return the sklearn TF-IDF + Logistic Regression pipeline."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -499,6 +787,34 @@ def select_task_backend(
         if confidence is not None and confidence < min_confidence:
             return base_fallback_decision("unknown", confidence)
 
+    return get_backend_for_task(task_type, confidence=confidence)
+
+
+def select_task_backend_for_image(
+    question: str,
+    image_path: str,
+    router: Any | None = None,
+    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+) -> RouterDecision:
+    """Route an image-question pair to the current best backend.
+
+    Multimodal routers should expose ``predict_with_confidence(question,
+    image_path)``. Text-only routers are still accepted as a fallback.
+    """
+    if router is None:
+        return select_task_backend(
+            question,
+            router=None,
+            min_confidence=min_confidence,
+        )
+
+    try:
+        task_type, confidence = router.predict_with_confidence(question, image_path)
+    except TypeError:
+        task_type, confidence = router.predict_with_confidence(question)
+
+    if confidence is not None and confidence < min_confidence:
+        return base_fallback_decision("unknown", confidence)
     return get_backend_for_task(task_type, confidence=confidence)
 
 
