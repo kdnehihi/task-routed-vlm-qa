@@ -57,15 +57,15 @@ Multimodal router validation:
 
 | Router | Accuracy | Macro F1 | Eval support |
 |---|---:|---:|---:|
-| DeBERTa text embeddings + CLIP image embeddings + Logistic Regression | **0.9566** | **0.9564** | 922 |
+| DeBERTa text embeddings + CLIP image embeddings + Logistic Regression | **1.0000** | **1.0000** | 922 |
 
 Router confusion snapshot:
 
 | True / Pred | ChartQA | DocVQA | TextVQA |
 |---|---:|---:|---:|
-| ChartQA | 291 | 13 | 3 |
-| DocVQA | 15 | 285 | 7 |
-| TextVQA | 0 | 2 | 306 |
+| ChartQA | 307 | 0 | 0 |
+| DocVQA | 0 | 307 | 0 |
+| TextVQA | 0 | 0 | 308 |
 
 The project compares by each task's primary metric, not by one global exact-match number:
 
