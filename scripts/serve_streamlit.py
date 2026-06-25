@@ -29,6 +29,9 @@ from src.routing.task_router import (
 MODEL_NAME = "Qwen/Qwen2.5-VL-7B-Instruct"
 CHART_ADAPTER_PATH = "checkpoints/chart_dora_r8_a16_B_lr2e-5/chart_dora_r8_a16_B_lr2e-5"
 TEXT_ADAPTER_PATH = "checkpoints/textvqa_lora/textvqa_lora"
+DRIVE_CHECKPOINT_ROOT = Path(
+    "/content/drive/MyDrive/multi-task-moe-vlm-assistant/checkpoints"
+)
 
 DOCVQA_PROMPT_TEMPLATE = """Read the document and answer the question.
 Return only the exact answer span.
@@ -54,6 +57,31 @@ Do not include extra text.
 
 Question: {question}
 Answer:"""
+
+
+def candidate_router_paths() -> list[Path]:
+    """Return router checkpoint locations commonly used locally and on Colab."""
+    return [
+        Path(DEFAULT_MULTIMODAL_ROUTER_DIR),
+        PROJECT_ROOT / DEFAULT_MULTIMODAL_ROUTER_DIR,
+        DRIVE_CHECKPOINT_ROOT / "router/multimodal_deberta_clip_router",
+    ]
+
+
+def resolve_router_path(requested_path: str | Path) -> Path:
+    """Prefer the user path, otherwise auto-detect the trained router checkpoint."""
+    requested = Path(requested_path).expanduser()
+    if (requested / "multimodal_logreg.joblib").exists() or (
+        requested / "embedding_logreg.joblib"
+    ).exists():
+        return requested
+
+    for candidate in candidate_router_paths():
+        if (candidate / "multimodal_logreg.joblib").exists() or (
+            candidate / "embedding_logreg.joblib"
+        ).exists():
+            return candidate
+    return requested
 
 
 def load_router(
@@ -167,7 +195,9 @@ def main() -> None:
         value=str(DEFAULT_MULTIMODAL_ROUTER_DIR),
     )
     st.sidebar.caption(f"Text-only fallback path: `{DEFAULT_DEBERTA_ROUTER_DIR}`")
-    router_path_obj = Path(router_path)
+    router_path_obj = resolve_router_path(router_path)
+    if router_path_obj != Path(router_path).expanduser():
+        st.sidebar.success(f"Using detected router: `{router_path_obj}`")
     st.sidebar.json(router_checkpoint_status(router_path_obj))
     allow_rule_fallback = st.sidebar.checkbox(
         "Allow rule fallback if router checkpoint is missing",
