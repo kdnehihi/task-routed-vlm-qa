@@ -70,6 +70,15 @@ def load_router(
     return DebertaEmbeddingLogRegTaskRouter.load(router_path)
 
 
+def router_checkpoint_status(router_path: Path) -> dict[str, bool]:
+    """Return the router files the demo can load from a checkpoint directory."""
+    return {
+        "router_dir": router_path.exists(),
+        "multimodal_logreg.joblib": (router_path / "multimodal_logreg.joblib").exists(),
+        "embedding_logreg.joblib": (router_path / "embedding_logreg.joblib").exists(),
+    }
+
+
 def model_config_for_decision(decision: RouterDecision) -> dict:
     """Return Qwen wrapper config for the selected backend."""
     if decision.backend_name == CHARTQA_BACKEND_NAME:
@@ -158,6 +167,13 @@ def main() -> None:
         value=str(DEFAULT_MULTIMODAL_ROUTER_DIR),
     )
     st.sidebar.caption(f"Text-only fallback path: `{DEFAULT_DEBERTA_ROUTER_DIR}`")
+    router_path_obj = Path(router_path)
+    st.sidebar.json(router_checkpoint_status(router_path_obj))
+    allow_rule_fallback = st.sidebar.checkbox(
+        "Allow rule fallback if router checkpoint is missing",
+        value=False,
+        help="Fallback only reads the question text, so it can route chart images to TextVQA.",
+    )
     min_confidence = st.sidebar.slider(
         "Router confidence fallback",
         min_value=0.0,
@@ -187,7 +203,26 @@ def main() -> None:
     if st.button("Answer", type="primary"):
         image_path = save_uploaded_image(uploaded_image)
         with st.spinner("Loading router..."):
-            router = load_router(Path(router_path))
+            router = load_router(router_path_obj)
+            if router is None:
+                if not allow_rule_fallback:
+                    st.error(
+                        "Router checkpoint is missing, so routing by image is disabled. "
+                        "Copy or select the trained multimodal router checkpoint before answering."
+                    )
+                    st.code(
+                        "\n".join(
+                            [
+                                str(router_path_obj / "multimodal_logreg.joblib"),
+                                str(router_path_obj / "embedding_logreg.joblib"),
+                            ]
+                        )
+                    )
+                    st.stop()
+                st.warning(
+                    "Router checkpoint missing. Using the question-only rule fallback, "
+                    "which may choose the wrong backend for chart images."
+                )
             decision = select_task_backend_for_image(
                 question,
                 image_path,
