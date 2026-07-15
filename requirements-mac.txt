@@ -1,0 +1,5 @@
+# Mac local smoke/debug environment for Apple Silicon.
+# Install these first in a fresh environment, then install requirements.txt.
+torch
+torchvision
+torchaudio

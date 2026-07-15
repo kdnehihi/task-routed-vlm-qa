@@ -1,0 +1,39 @@
+{
+  "name": "routed-qwen25vl-v1",
+  "description": "Production serving contract for the routed ChartQA, DocVQA, and TextVQA system.",
+  "model_name": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "router_dir": "checkpoints/router/multimodal_deberta_clip_router",
+  "chart_adapter_path": "checkpoints/chart_dora_r8_a16_B_lr2e-5/chart_dora_r8_a16_B_lr2e-5",
+  "text_adapter_path": "checkpoints/textvqa_lora/textvqa_lora",
+  "min_confidence": 0.55,
+  "min_pixels": 200704,
+  "max_pixels": 301056,
+  "require_adapters": true,
+  "require_local_router_encoders": false,
+  "local_files_only": false,
+  "load_in_4bit": false,
+  "training_source": "notebooks/train_qwen2vl_lora_baseline.ipynb and notebooks/router_deberta.ipynb",
+  "release_version": "2026-07-15-routed-qwen25vl-v1",
+  "python_version": "3.12",
+  "scikit_learn_version": "1.6.1",
+  "quality_gates": {
+    "chartqa": {
+      "metric": "chart_hybrid_accuracy",
+      "min_score": 0.80
+    },
+    "docvqa": {
+      "metric": "docvqa_anls",
+      "min_score": 0.84
+    },
+    "textvqa": {
+      "metric": "textvqa_vqa_score",
+      "min_score": 0.74
+    },
+    "routing": {
+      "metric": "routing_accuracy",
+      "min_score": 0.98
+    }
+  },
+  "owner": "multi-task-moe-vlm-assistant",
+  "stage": "local-production"
+}

@@ -7,6 +7,8 @@ accelerate
 peft
 qwen-vl-utils
 bitsandbytes
+tiktoken
+sentencepiece
 
 # Configuration and experiment tracking.
 hydra-core
@@ -16,7 +18,7 @@ wandb
 # Evaluation and utilities.
 numpy
 pandas
-scikit-learn
+scikit-learn==1.6.1
 tqdm
 Pillow
 

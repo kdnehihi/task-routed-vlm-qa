@@ -1,0 +1,6 @@
+# CUDA serving/evaluation environment.
+# Install with the CUDA wheel index that matches the target machine, for example:
+# pip install -r requirements-cuda.txt --index-url https://download.pytorch.org/whl/cu128
+torch
+torchvision
+torchaudio

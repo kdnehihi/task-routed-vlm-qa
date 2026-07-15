@@ -557,6 +557,7 @@ class MultimodalDebertaClipTaskRouter:
         cls,
         path: str | Path = DEFAULT_MULTIMODAL_ROUTER_DIR,
         device: str | None = None,
+        local_files_only: bool = False,
     ) -> "MultimodalDebertaClipTaskRouter":
         """Load a saved multimodal router directory."""
         import json
@@ -588,16 +589,20 @@ class MultimodalDebertaClipTaskRouter:
         image_encoder_path = path / "image_encoder"
 
         text_tokenizer = AutoTokenizer.from_pretrained(
-            str(text_tokenizer_path) if text_tokenizer_path.exists() else text_model_name
+            str(text_tokenizer_path) if text_tokenizer_path.exists() else text_model_name,
+            local_files_only=local_files_only,
         )
         text_encoder = AutoModel.from_pretrained(
-            str(text_encoder_path) if text_encoder_path.exists() else text_model_name
+            str(text_encoder_path) if text_encoder_path.exists() else text_model_name,
+            local_files_only=local_files_only,
         ).to(device)
         image_processor = CLIPProcessor.from_pretrained(
-            str(image_processor_path) if image_processor_path.exists() else image_model_name
+            str(image_processor_path) if image_processor_path.exists() else image_model_name,
+            local_files_only=local_files_only,
         )
         image_encoder = CLIPModel.from_pretrained(
-            str(image_encoder_path) if image_encoder_path.exists() else image_model_name
+            str(image_encoder_path) if image_encoder_path.exists() else image_model_name,
+            local_files_only=local_files_only,
         ).to(device)
         classifier = joblib.load(classifier_path)
 

@@ -239,21 +239,135 @@ The notebook:
 
 ## FastAPI Direction
 
-The FastAPI path is in progress for a cleaner deployment shape:
+The FastAPI path is now organized around a cleaner deployment shape:
 
 ```text
 startup:
+  read serving manifest
+  validate artifact contract before release
   load router once
   load Qwen2.5-VL once
   load ChartQA and TextVQA adapters once
 
 request:
+  create request_id
   route task
   switch adapter or disable adapter
   generate answer
+  log inference metadata
 ```
 
 This avoids repeatedly loading Qwen2.5-VL for each request.
+
+## LLMOps / MLOps Runtime
+
+The deployable contract lives in:
+
+```text
+configs/serving_manifest.json
+```
+
+It records the model, router, adapter paths, release version, training source,
+runtime version expectations, and quality gates.
+
+Validate local artifacts:
+
+```bash
+make validate-artifacts
+```
+
+Prefetch model cache before the first full run:
+
+```bash
+make prefetch-models
+```
+
+After prefetching, use `HF_LOCAL_FILES_ONLY=1` for serving/evaluation so startup
+does not depend on network availability.
+For local CPU/MPS checks, use `scripts/evaluate_routed.py --load-only`; full 7B
+generation should run on CUDA, preferably with `ROUTED_VLM_LOAD_IN_4BIT=1`.
+
+## Local Mac MPS vs GPU Lab
+
+The released backbone is `Qwen/Qwen2.5-VL-7B-Instruct`. This 7B model is a good
+fit for a GPU notebook/lab machine, especially with CUDA and 4-bit loading. On a
+local Mac, the practical accelerator is Apple MPS, not CUDA. MPS is useful for
+checking that the router, backbone, and adapters load correctly, but full
+Qwen2.5-VL-7B generation can be very slow on local hardware.
+
+Check the current accelerator:
+
+```bash
+make check-accelerator
+```
+
+Recommended local Mac setup:
+
+```bash
+conda create -n routed-vlm-mps python=3.12 -y
+conda activate routed-vlm-mps
+pip install -r requirements-mac.txt
+pip install -r requirements.txt
+make prefetch-models
+HF_LOCAL_FILES_ONLY=1 ROUTED_VLM_DEVICE=mps \
+  python scripts/evaluate_routed.py \
+  --manifest configs/serving_manifest.json \
+  --metadata-path data/processed/multitask/validation.jsonl \
+  --load-only
+```
+
+Recommended GPU notebook/lab setup:
+
+```bash
+pip install -r requirements-cuda.txt --index-url https://download.pytorch.org/whl/cu128
+pip install -r requirements.txt
+make prefetch-models
+HF_LOCAL_FILES_ONLY=1 ROUTED_VLM_DEVICE=cuda ROUTED_VLM_LOAD_IN_4BIT=1 \
+  python scripts/serve_api.py
+```
+
+Use Mac MPS for local smoke checks and development. Use CUDA GPU for full
+evaluation, release gates, and real interactive serving.
+
+Run tests:
+
+```bash
+make test
+```
+
+Run the API with the manifest:
+
+```bash
+make serve-api
+```
+
+Operational endpoints:
+
+- `GET /health`
+- `GET /metadata`
+- `GET /metrics`
+- `POST /predict`
+
+Every prediction writes a compact JSONL event to `outputs/logs/inference.jsonl`
+by default. The log includes request id, model/manifest, task decision, adapter,
+latency, answer, and image hash metadata.
+
+Before promoting a new manifest, generate validation predictions and run:
+
+```bash
+make evaluate-routed
+```
+
+Then gate the release:
+
+```bash
+python scripts/run_release_gate.py \
+  --manifest configs/serving_manifest.json \
+  --predictions outputs/predictions/routed_validation.jsonl \
+  --report-out outputs/reports/release_gate_report.json
+```
+
+For a fuller operations checklist, see `docs/operations.md`.
 
 ## Repository Layout
 
@@ -262,9 +376,12 @@ assets/readme/        README screenshots
 data/                 raw and processed VQA data
 notebooks/            Colab and experiment notebooks
 scripts/              data prep, training, and demo entrypoints
+configs/              serving manifest and model configuration
+docs/                 design, roadmap, experiment, and operations notes
 src/data/             answer selection, preprocessing, ChartQA sampling
 src/evaluation/       task-specific metrics and JSONL reports
 src/models/           Qwen2.5-VL wrappers and LoRA utilities
+src/ops/              manifest, release gate, logging, and runtime ops helpers
 src/routing/          task router and backend selection
 src/serving/          FastAPI and routed inference service
 tests/                data, metric, router, and adapter tests

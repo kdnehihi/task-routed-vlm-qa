@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from src.models.baseline_vlm import DEFAULT_QWEN25VL_MODEL_NAME
+from src.ops.model_manifest import ServingManifest
 from src.routing.task_router import (
     BASE_BACKEND_NAME,
     CHARTQA_BACKEND_NAME,
@@ -74,6 +75,8 @@ class RoutedVLMService:
         min_pixels: int = 256 * 28 * 28,
         max_pixels: int = 384 * 28 * 28,
         require_adapters: bool = True,
+        local_files_only: bool = False,
+        load_in_4bit: bool = False,
     ) -> None:
         self.model_name = model_name
         self.router_dir = Path(router_dir)
@@ -83,11 +86,31 @@ class RoutedVLMService:
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
         self.require_adapters = require_adapters
+        self.local_files_only = local_files_only
+        self.load_in_4bit = load_in_4bit
 
         self.router: MultimodalDebertaClipTaskRouter | None = None
         self.processor: Any | None = None
         self.model: Any | None = None
         self.loaded_adapters: set[str] = set()
+        self.manifest: ServingManifest | None = None
+
+    @classmethod
+    def from_manifest(cls, manifest: ServingManifest) -> "RoutedVLMService":
+        """Build a service from an explicit serving artifact manifest."""
+        service = cls(
+            model_name=manifest.model_name,
+            router_dir=manifest.router_dir,
+            chart_adapter_path=manifest.chart_adapter_path,
+            text_adapter_path=manifest.text_adapter_path,
+            min_pixels=manifest.min_pixels,
+            max_pixels=manifest.max_pixels,
+            require_adapters=manifest.require_adapters,
+            local_files_only=manifest.local_files_only,
+            load_in_4bit=manifest.load_in_4bit,
+        )
+        service.manifest = manifest
+        return service
 
     def load(self) -> "RoutedVLMService":
         """Load all long-lived inference objects."""
@@ -119,7 +142,11 @@ class RoutedVLMService:
         classifier_path = self.router_dir / "multimodal_logreg.joblib"
         if not classifier_path.exists():
             return None
-        return MultimodalDebertaClipTaskRouter.load(self.router_dir, device=self.device)
+        return MultimodalDebertaClipTaskRouter.load(
+            self.router_dir,
+            device=self.device,
+            local_files_only=self.local_files_only,
+        )
 
     def _load_qwen_model(self) -> None:
         import torch
@@ -127,18 +154,33 @@ class RoutedVLMService:
 
         model_class = self._get_qwen_vl_model_class()
         self.device = self.device or self._select_device(torch)
-        torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+        torch_dtype = self._torch_dtype_for_device(torch, self.device)
 
         self.processor = AutoProcessor.from_pretrained(
             self.model_name,
             min_pixels=self.min_pixels,
             max_pixels=self.max_pixels,
+            local_files_only=self.local_files_only,
         )
-        base_model = model_class.from_pretrained(
-            self.model_name,
-            torch_dtype=torch_dtype,
-            device_map="auto" if self.device == "cuda" else None,
-        )
+        load_kwargs = {
+            "torch_dtype": torch_dtype,
+            "device_map": "auto" if self.device == "cuda" else None,
+            "local_files_only": self.local_files_only,
+        }
+        if self.load_in_4bit:
+            if self.device != "cuda":
+                raise ValueError("4-bit loading requires device='cuda'.")
+            from transformers import BitsAndBytesConfig
+
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+            )
+            load_kwargs.pop("torch_dtype")
+
+        base_model = model_class.from_pretrained(self.model_name, **load_kwargs)
         if self.device != "cuda":
             base_model.to(self.device)
 
@@ -289,3 +331,9 @@ class RoutedVLMService:
         ):
             return "mps"
         return "cpu"
+
+    @staticmethod
+    def _torch_dtype_for_device(torch_module, device: str):
+        if device in {"cuda", "mps"}:
+            return torch_module.float16
+        return torch_module.float32
